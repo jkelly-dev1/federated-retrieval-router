@@ -1,0 +1,1 @@
+A federated retrieval router over four stores -- vector, graph, full-text and relational -- that measures the ROUTING DECISION rather than just the retrieval: per-backend precision and recall, fan-out cost beside correctness, and the finding that a balanced evaluation set overstates the case for federation by 2.4x versus a realistic query mix.

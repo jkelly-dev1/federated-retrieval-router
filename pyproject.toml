@@ -1,0 +1,18 @@
+[project]
+name = "federated-retrieval-router"
+version = "0.1.0"
+description = "One query, four stores, one ranked answer -- and a measurement of whether the routing decision was right."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "James Kelly" }]
+dependencies = []
+
+[project.optional-dependencies]
+openai = ["openai>=1.40"]
+anthropic = ["anthropic>=0.40"]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

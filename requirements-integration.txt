@@ -1,0 +1,19 @@
+# OPTIONAL. Nothing here is needed to run the tests, the gate or the demo.
+#
+# `pip install -r requirements.txt && pytest` installs nothing from this file
+# and stays dependency-free, offline and green. These packages exist only for
+# the real-store A/B in scripts/compare_stores.py and the integration tests in
+# tests/test_integration.py, which SKIP themselves when the services are not
+# running.
+#
+#   docker compose up -d                          # pgvector + elasticsearch
+#   pip install -r requirements-integration.txt
+#   pytest tests/test_integration.py -v           # skips turn into passes
+#   python scripts/compare_stores.py
+#
+# DuckDB is the odd one out and is listed first on purpose: it needs no
+# container and no server, so the relational half of the A/B runs anywhere pip
+# does.
+duckdb>=1.1
+psycopg[binary]>=3.2
+elasticsearch>=8.15,<9
