@@ -1,0 +1,45 @@
+# Optional infrastructure for the real-store a/b. Nothing in this repository
+# requires it: the tests, the gate and the demo all run offline with no
+# container, and the integration tests skip when nothing is listening here.
+#
+#   docker compose up -d
+#   pip install -r requirements-integration.txt
+#   pytest tests/test_integration.py -v
+#   python scripts/compare_stores.py
+#   docker compose down -v
+#
+# Both services are bound to localhost and hold only the synthetic corpus. The
+# passwords are in plain text because they protect nothing: 85 fictional
+# documents about fictional services, thrown away with `down -v`. A reader
+# should not mistake this for a deployment template.
+services:
+  pgvector:
+    # Pinned rather than :latest. An A/B whose store version moves between runs
+    # is measuring the version as much as the store.
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: frr-local-only
+      POSTGRES_DB: frr
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d frr"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      # Single node, security off, small heap. This is a scratch index for a
+      # synthetic corpus, not a cluster.
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:59200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

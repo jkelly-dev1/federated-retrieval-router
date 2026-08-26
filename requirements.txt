@@ -1,0 +1,11 @@
+# The measurement layer is pure Python: no numpy, no scipy, no sklearn, and no
+# retrieval library. BM25, cosine similarity, the graph traversal and the rank
+# fusion are all written out in this repository so the comparison between
+# backends is legible rather than delegated to four library calls.
+pytest>=8,<10
+
+# Optional real-model providers, imported lazily and needed only by
+# scripts/real_run.py. They are NOT installed by the offline suite, which must
+# pass without them -- tests/test_providers.py asserts that.
+# openai>=1.40
+# anthropic>=0.40

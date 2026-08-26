@@ -1,0 +1,1 @@
+Search and relevance across four stores -- vector embeddings, graph, full-text and relational -- measuring the ROUTING DECISION rather than the retrieval alone: per-backend precision and recall, fan-out cost beside correctness, and the finding that a balanced evaluation set overstates federation by 2.4x versus a realistic query mix.
