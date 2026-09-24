@@ -1,13 +1,10 @@
 """The paid seam, tested without paying and without the SDKs installed.
 
-This file exists because of a real failure in a sibling repository. Its
-provider tests constructed live SDK clients, which passed on a machine where
-`openai` and `anthropic` happened to be installed and failed on all three
-Python versions in CI, where they deliberately are not. The lesson is in the
-first test below: the interesting assertion is not that the provider works with
-the SDK present, it is what happens when it is absent.
-
-So every test here runs with no key, no network and no optional dependency.
+A provider test that constructs a live SDK client passes on a machine where
+`openai` and `anthropic` happen to be installed and fails in CI, where they
+deliberately are not. The interesting assertion is therefore not that the
+provider works with the SDK present but what happens when it is absent, and
+every test here runs with no key, no network and no optional dependency.
 """
 from __future__ import annotations
 
@@ -36,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_a_missing_sdk_is_a_sentence_not_a_traceback(monkeypatch):
-    """The failure that broke CI on a sibling repository, pinned here.
+    """A missing SDK gives a sentence naming the package, not a traceback.
 
     `openai` is commented out of requirements.txt on purpose, so the offline
     suite must behave identically whether or not it happens to be installed.

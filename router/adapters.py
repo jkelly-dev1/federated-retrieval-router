@@ -18,10 +18,10 @@ The offline path remains the default and stays dependency-free. `pip install
 -r requirements.txt && pytest` installs nothing from this file's imports and
 never touches a network. Every driver import happens inside a constructor,
 behind an injected-client escape hatch, and a missing driver produces a
-sentence naming the package rather than a traceback: the same shape as
-router/providers.py, and for the same reason. A sibling repository shipped
-provider tests that constructed live clients, passed on the maintainer's
-machine, and failed on all three Python versions in CI.
+sentence naming the package instead of a traceback: the same shape as
+router/providers.py, and for the same reason. A test that constructs a live
+client passes on a machine where the driver happens to be installed and fails
+in CI, where it is not.
 
 What an a/b between two stores can and cannot separate. Swapping the
 hand-rolled BM25 for Elasticsearch changes the scoring implementation AND the

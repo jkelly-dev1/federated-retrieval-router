@@ -96,17 +96,43 @@ class RoutingReport:
         return (self.correct - self.trap_correct) / plain if plain else 0.0
 
 
+def _require_aligned(
+    queries: Sequence[LabeledQuery],
+    decisions: Sequence[RoutingDecision],
+    what: str,
+) -> None:
+    """Refuse a query list and a decision list that do not correspond.
+
+    Every scorer in this module needs this. A bare `zip` stops at the shorter
+    list and pairs whatever happens to line up: rotating the decision list by
+    one position would move the production-mix column from 0.931 to 0.496, and
+    truncating it to ten queries would produce a perfect 1.0, both without a
+    word of complaint. A misaligned score is not a wrong number a reader can
+    catch; it is a plausible one.
+
+    It is one function that all three scorers call, so a new scorer has an
+    obvious check to reuse.
+    """
+    if len(queries) != len(decisions):
+        raise ValueError(
+            f"{len(queries)} queries but {len(decisions)} decisions; {what} "
+            f"against a different query set is silently meaningless"
+        )
+    for labeled, decision in zip(queries, decisions):
+        if labeled.query_id != decision.query_id:
+            raise ValueError(
+                f"decision {decision.query_id!r} does not match query "
+                f"{labeled.query_id!r}; the lists are misaligned"
+            )
+
+
 def score_routing(
     router_name: str,
     queries: Sequence[LabeledQuery],
     decisions: Sequence[RoutingDecision],
 ) -> RoutingReport:
     """Score a router's decisions against the labeled ground truth."""
-    if len(queries) != len(decisions):
-        raise ValueError(
-            f"{len(queries)} queries but {len(decisions)} decisions; scoring a "
-            f"router against a different query set is silently meaningless"
-        )
+    _require_aligned(queries, decisions, "scoring a router")
 
     chosen_n: dict[Backend, int] = defaultdict(int)
     required_n: dict[Backend, int] = defaultdict(int)
@@ -116,11 +142,6 @@ def score_routing(
     failures: list[tuple[str, frozenset[Backend], frozenset[Backend]]] = []
 
     for labeled, decision in zip(queries, decisions):
-        if labeled.query_id != decision.query_id:
-            raise ValueError(
-                f"decision {decision.query_id!r} does not match query "
-                f"{labeled.query_id!r}; the lists are misaligned"
-            )
         total_fan_out += len(decision.chosen)
         ok = decision.is_correct(labeled)
         correct += int(ok)
@@ -278,6 +299,7 @@ def weighted_correctness(
     spans several, then renormalized. Queries whose competences carry no
     weight contribute nothing rather than silently defaulting to one.
     """
+    _require_aligned(queries, decisions, "weighting a router's correctness")
     total_weight = 0.0
     correct_weight = 0.0
     for labeled, decision in zip(queries, decisions):
@@ -302,6 +324,7 @@ def confusion(
     misroute that produces a confident, fluent, wrong answer rather than an
     empty result: the expensive kind.
     """
+    _require_aligned(queries, decisions, "building a confusion matrix")
     matrix: dict[tuple[Backend, Backend], int] = defaultdict(int)
     for labeled, decision in zip(queries, decisions):
         for req in labeled.required:

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import socket
+from urllib.parse import urlparse
 
 import pytest
 
@@ -54,7 +55,20 @@ def _require(module: str):
     )
 
 
-def _require_service(name: str, host: str, port: int) -> None:
+def _endpoint(url: str, default_port: int) -> tuple[str, int]:
+    """The (host, port) the adapter under test will actually connect to.
+
+    PG_DSN and ES_URL are configurable, so the skip probes follow them; a
+    probe of the hardcoded local defaults would skip a remote leg with a
+    message naming an address nobody configured. scripts/compare_stores.py
+    does the same in `endpoint`.
+    """
+    parsed = urlparse(url)
+    return parsed.hostname or "127.0.0.1", parsed.port or default_port
+
+
+def _require_service(name: str, url: str, default_port: int) -> None:
+    host, port = _endpoint(url, default_port)
     if not _listening(host, port):
         pytest.skip(f"{name} is not listening on {host}:{port}; docker compose up -d")
 
@@ -122,7 +136,7 @@ def test_duckdb_loaded_only_the_incident_rows(duckdb_backend, corpus):
 @pytest.fixture(scope="module")
 def pg_backend(corpus):
     _require("psycopg")
-    _require_service("pgvector", "127.0.0.1", 55432)
+    _require_service("pgvector", PG_DSN, 5432)
     backend = PgVectorBackend(corpus.documents, HashingEmbedder(), dsn=PG_DSN)
     backend.load()
     return backend
@@ -157,7 +171,7 @@ def test_pgvector_agrees_with_the_in_memory_cosine_on_the_top_hit(pg_backend, co
 @pytest.fixture(scope="module")
 def es_backend(corpus):
     _require("elasticsearch")
-    _require_service("elasticsearch", "127.0.0.1", 59200)
+    _require_service("elasticsearch", ES_URL, 9200)
     backend = ElasticsearchBackend(corpus.documents, url=ES_URL, analyzer="matching")
     backend.load()
     return backend
@@ -169,19 +183,17 @@ def test_the_matching_analyzer_produces_the_same_tokens_as_this_repository(
     """The test that was missing, and the reason the fulltext A/B had to be
     thrown away and re-run once (bug log, defect 19).
 
-    Two offline tests already claimed this analyzer mirrored
-    router/embeddings.py. One asserted the mapping carried the same regex
-    SOURCE as `_TOKEN`; the other asserted both legs return the same top hit
-    for an identifier. Both passed against an analyzer that was emitting
-    ["heckout", "ervice"] for "Checkout Service", because Elasticsearch runs
-    the tokenizer BEFORE the lowercase filter while this repository lowercases
-    first, and because a query mangled the same way as the documents still
-    finds them.
+    Offline checks cannot settle whether this analyzer mirrors
+    router/embeddings.py. Comparing the regex source with `_TOKEN` passes for
+    an analyzer that emits ["heckout", "ervice"] for "Checkout Service",
+    because Elasticsearch runs the tokenizer before the lowercase filter while
+    this repository lowercases first, and comparing top hits passes because a
+    query mangled the same way as the documents still finds them.
 
-    So this asserts the only thing that settles it: run real corpus text and
-    real query text through the actual _analyze endpoint and require the token
-    LIST to equal content_tokens() exactly. Nothing short of the running
-    service can check this, so it lives here rather than offline.
+    This runs real corpus text and real query text through the actual
+    _analyze endpoint and requires the token list to equal content_tokens()
+    exactly. Nothing short of the running service can check this, so it lives
+    here and not offline.
     """
     from router.embeddings import content_tokens
 
@@ -251,7 +263,7 @@ def test_the_two_analyzers_are_two_different_measurements(corpus):
     scoring. If these two ever returned identical rankings on every query, the
     'matching' analyzer would not be mirroring anything."""
     _require("elasticsearch")
-    _require_service("elasticsearch", "127.0.0.1", 59200)
+    _require_service("elasticsearch", ES_URL, 9200)
     english = ElasticsearchBackend(
         corpus.documents, url=ES_URL, index="frr-documents-english", analyzer="english"
     )

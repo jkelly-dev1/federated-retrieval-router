@@ -216,13 +216,12 @@ def documents() -> tuple[Document, ...]:
 
 # ------------------------------------------------------- distractors
 #
-# The anchors above cannot carry a measurement on their own, and the first
-# version of this file tried to. Twelve documents means a top-5 result set
-# holds 42% of the corpus, so every backend "finds" the answer and recall@5
-# cannot tell a leg that ranks it first from one that ranks it fifth. Measured
-# against the labels, agreement was 1 of 11.
+# The anchors above cannot carry a measurement on their own. Twelve documents
+# means a top-5 result set holds 42% of the corpus, so every backend "finds"
+# the answer and recall@5 cannot tell a leg that ranks it first from one that
+# ranks it fifth.
 #
-# The documents below are the fix. They are not padding: each group exists to
+# The documents below are not padding: each group exists to
 # make a specific competence hard to fake.
 #
 #   NEAR-MISS DESIGNS   adjacent topics on other services: circuit breaking

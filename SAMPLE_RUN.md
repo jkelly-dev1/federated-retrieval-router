@@ -3,7 +3,12 @@
 Verbatim captures of `scripts/run_demo.py`, the gate and the test suite, so a
 reviewer without an API key can see exactly what this project measures and what
 it refuses to claim. Nothing here is retyped or cleaned up. Offline captures
-2026-08-02; the paid capture 2026-08-03.
+2026-09-13; the paid capture 2026-08-03.
+
+The offline captures are newer than the paid one. All three offline blocks
+come from one run of the current tree. The paid capture keeps its own date
+because it was not re-run: it costs money, and re-running it would replace a
+measurement, not refresh a transcription.
 
 Every number in the first three sections comes from the deterministic offline
 stack: a 256-dimension hash embedder and an 85-document in-memory corpus. That
@@ -12,7 +17,7 @@ about nothing else. Section 4 of the demo measures the offline instrument's own
 shortfall, which is otherwise only implied.
 
 [The paid capture](#the-paid-capture) is the one section with a real embedding
-model and two real routers in it. It is a capture, not a baseline: the gate
+model and two real routers in it. It is a capture and not a baseline: the gate
 does not read it, no test asserts on it, and re-running it will produce
 different numbers. It is here because three of this project's questions cannot
 be answered offline at all, and one of them is how much a re-run moves, so
@@ -126,9 +131,10 @@ federated-retrieval-router demo
   fulltext           5       5   1.00    1.00     0     0
   relational         5       5   1.00    1.00     0     0
 
-  Where it still misroutes:
+  Where it still misroutes, WITH THE FEATURE THAT FIRED:
     q-multi-2: needed ['graph', 'vector'], chose ['vector']
       what went wrong with retries in the incident that hit checkout ...
+      -> 9 prose token(s) -> vector
 
 ==============================================================================
 3. The query mix decides the verdict
@@ -216,6 +222,65 @@ federated-retrieval-router demo
   happens. That is why the window is measured rather than chosen.
 
 ==============================================================================
+6. The pipeline end to end: route, consult, fuse
+==============================================================================
+------------------------------------------------------------------------------
+  q-exact-1  ERR_UPSTREAM_4423
+------------------------------------------------------------------------------
+    route     identifier token(s) ['ERR_UPSTREAM_4423'] -> fulltext
+    route     relationship tell 'upstream' SUPPRESSED: no query token is a
+              graph node, so a traversal has nowhere to start
+    consulted ['fulltext']  (1 of 4)
+    SKIPPED   ['graph', 'relational', 'vector']
+    1. runbook-err-101            0.0164  via fulltext
+
+------------------------------------------------------------------------------
+  q-agg-1  how many incidents did payments have in 2026
+------------------------------------------------------------------------------
+    route     aggregate tell 'how many' + countable 'incident'
+    route     4 prose token(s) -> vector
+    consulted ['relational', 'vector']  (2 of 4)
+    SKIPPED   ['fulltext', 'graph']
+    1. agg:count:payments:2026    0.0164  via relational
+    2. incident-2026q2-pay-06     0.0164  via vector
+    3. runbook-cfg-103            0.0161  via vector
+
+------------------------------------------------------------------------------
+  q-multi-1  how many incidents touched services owned by the money team in ...
+------------------------------------------------------------------------------
+    route     aggregate tell 'how many' + countable 'incident'
+    route     relationship tell 'owned by' + linked ['money']
+    route     6 prose token(s) -> vector
+    consulted ['graph', 'relational', 'vector']  (3 of 4)
+    SKIPPED   ['fulltext']
+    1. agg:count:all:2026q3       0.0164  via relational
+    2. billing                    0.0164  via graph
+    3. incident-2026q3-cat-04     0.0164  via vector
+
+  Over all 19 labeled queries, legs actually consulted:
+    heuristic  1.53 backends per query
+    fan-out    4.00 backends per query
+
+  THAT FIRST NUMBER IS MEASURED, NOT ASSUMED. It counts the legs
+  this run actually searched rather than the size of the sets the
+  router produced, so a widened route shows up as work done.
+
+------------------------------------------------------------------------------
+  What a partially failed fan-out looks like
+------------------------------------------------------------------------------
+  RRF takes a mapping and cannot tell a leg that returned nothing
+  from a leg that was never asked from a leg that raised: all three
+  are an absent key, and the merged list looks whole in every case.
+  So a failed leg is named and the answer is marked incomplete.
+
+  query: why do we keep seeing ERR_TOKEN_9101 after partner rotations
+    complete  False
+    FAILED    fulltext: ConnectionError: connection refused
+    1. incident-2026-022          0.0164  via vector
+    2. design-circuit-ord         0.0161  via vector
+    3. design-cachewarm-sea       0.0159  via vector
+
+==============================================================================
 What this demo does NOT claim
 ==============================================================================
   - The embedder is a hash model, not a semantic one. Every vector
@@ -233,10 +298,11 @@ What this demo does NOT claim
 
 ## The gate
 
-The gate protects the MEASUREMENT rather than a product, and fails in both
-directions. Two of its checks exist because of defects this project already
-had: the corpus was once too small to discriminate at all, and the offline
-embedder loses paraphrases to BM25 in a way that must not silently disappear.
+The gate protects the measurement, not a product, and fails in both
+directions. Two of its checks guard properties that are easy to lose without
+noticing: a corpus large enough to discriminate at all, and the offline
+embedder losing paraphrases to BM25 in a way that must not silently
+disappear.
 
 ```
 python -m router.gate ; echo "exit=$?"
@@ -254,9 +320,11 @@ federated-retrieval-router gate: deterministic mock, offline
   [PASS] the traps still trap a single-store baseline                    vector-only 2/5, heuristic 5/5
   [PASS] the query mix still changes the verdict                         vector-only 0.263 balanced vs 0.634 prod-mix, a 2.4x swing
   [PASS] the offline embedder still loses paraphrases to BM25            designed backend wins 7/11; a clean sweep would mean the mock got semantic or the queries stopped being paraphrases
-  [PASS] the fusion window is deep enough to fuse what the legs return   recall appears at window 1, default is 20
+  [PASS] the fusion window is deep enough to fuse what the legs return   deepest plateau is window 20 (q-multi-2) over 11 queries, default is 20
+  [PASS] the heuristic router still costs what the README says it costs  1.53 backends/query (ceiling 1.60), a 62% saving against fan-out
+  [PASS] the legs actually consulted match the routing decisions scored  executed 1.53 vs scored 1.53 backends/query
 
-GATE PASSED (9 checks)
+GATE PASSED (11 checks)
   routing is still measurable, a single store still loses, and the
   corpus can still tell one competence from another.
 exit=0
@@ -269,9 +337,10 @@ pytest -q
 ```
 
 ```
-...........................................................sssssssssss.. [ 54%]
-...........................................................              [100%]
-136 passed, 16 skipped in 0.84s
+....................................................sss................. [ 40%]
+........sssssssssssss................................................... [ 80%]
+...................................                                      [100%]
+163 passed, 16 skipped in 1.82s
 ```
 
 That capture is from a fresh virtual environment holding nothing but `pytest`.
@@ -281,22 +350,21 @@ suite installs no optional dependency and makes no network call.
 Its 16 skips are the design, not a gap. Thirteen are the real-store integration
 tests in `tests/test_integration.py` and three are the partial- comparison tests
 in `tests/test_compare_stores.py`. All of them skip with a reason naming what
-was missing rather than failing because a container is not running. A red suite
+was missing instead of failing because a container is not running. A red suite
 that means "you did not start Docker" teaches people to ignore red suites.
 
 In the development environment, where `duckdb` is installed, the same suite
-reports 145 passed, 7 skipped: the six DuckDB integration tests and the three
+reports 172 passed, 7 skipped: the six DuckDB integration tests and the three
 partial-comparison tests run instead of skipping, and the seven that need
 pgvector or Elasticsearch containers still skip. Same tests, different
 environment, and the difference is visible in the count rather than hidden.
 
-The suite is run in both environments before publication, and that is not
-ceremony. A sibling repository shipped provider tests that constructed live SDK
-clients, passed on the maintainer's machine and failed on all three Python
-versions in CI. `tests/test_providers.py` and `tests/test_adapters.py` now pin
-the behavior that differs: every optional driver is hidden from the import
-system in a test, so the result is identical whether or not it happens to be
-installed.
+The suite is run in both environments before publication. A test that
+constructs a live SDK client passes where the SDK happens to be installed and
+fails in CI, where it is not, so `tests/test_providers.py` and
+`tests/test_adapters.py` pin the behavior that differs: every optional driver
+is hidden from the import system in a test, so the result is identical whether
+or not it happens to be installed.
 
 ## The paid capture
 
@@ -743,7 +811,7 @@ and the second pass cost one hundredth of a cent.
 
 A model router is not one thing, and the difference is larger than the
 result. Given the same prompt, the same 19 queries and no corpus knowledge,
-`claude-opus-5` scored `1.000` in all ten runs across both samples, at 1.05 to
+`claude-opus-5` scored `1.000` in all ten runs across both samples, at 1.16 to
 1.21 backends per query, with zero misroutes in 190 routing decisions.
 `gpt-5.6-terra` never once exceeded the heuristic on correctness in either
 sample, it tied at `0.947` in two runs of the first and reached `0.895` at best

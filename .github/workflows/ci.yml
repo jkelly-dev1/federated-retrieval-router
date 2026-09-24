@@ -6,6 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege for the default GITHUB_TOKEN. Without this block the token
+# takes the repository-wide default, which is a SETTING rather than a property
+# of this file: a reader cannot tell from the tree what these jobs can do, and
+# a repository whose default is read-write hands both jobs write access to
+# contents, issues, packages and deployments for a workflow that only ever
+# reads the checkout. Declared here so the answer is in the file, and narrowed
+# per job below where anything needs less. codeql.yml already does this.
+permissions:
+  contents: read
+
 # Cancel an in-flight run when the same branch is pushed again.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,17 +25,18 @@ jobs:
   test-and-gate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      # Pinned to current majors (verified against the CI-green sibling repos):
-      # checkout v7, setup-python v7.
-      - uses: actions/checkout@v7
+      # Actions are pinned to a full commit SHA, because a tag can be moved.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -59,17 +70,18 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/run_demo.py
 
-  # Separate job, on purpose, and it is allowed to be the flaky one. The
-  # real-store A/B needs containers, and container startup is the least
-  # reliable thing in any CI file. Keeping it out of `test-and-gate` means a
-  # slow Elasticsearch boot can never turn the offline suite red, and the badge
-  # keeps meaning "the measurement still works" rather than "Docker was having
-  # a good day". The job above installs none of these drivers and never runs
+  # Separate job, and it is allowed to be the flaky one. The real-store A/B
+  # needs containers, and container startup is the least reliable thing in
+  # any CI file. Keeping it out of `test-and-gate` means a slow Elasticsearch
+  # boot can never turn the offline suite red, and the badge keeps meaning "the
+  # measurement still works" and not "Docker was having a good day". The job above installs none of these drivers and never runs
   # these tests; they skip there with a reason.
   integration-stores:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
+    permissions:
+      contents: read
 
     services:
       pgvector:
@@ -96,9 +108,9 @@ jobs:
           --health-interval 10s --health-timeout 5s --health-retries 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -110,7 +122,7 @@ jobs:
           pip install -r requirements.txt -r requirements-integration.txt
 
       # -rs prints the skip reasons. If a service failed to come up, the log
-      # says which one rather than showing a quietly green run of nothing.
+      # says which one instead of showing a quietly green run of nothing.
       - name: Integration tests against real stores
         env:
           PYTHONPATH: ${{ github.workspace }}

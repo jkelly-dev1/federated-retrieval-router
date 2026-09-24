@@ -39,6 +39,7 @@ from router.metrics import (
     weighted_correctness,
 )
 from router.models import Backend
+from router.search import federated_search, measured_fan_out
 from router.routing import (
     FanOutRouter,
     HeuristicRouter,
@@ -57,6 +58,16 @@ MAX_VECTOR_ONLY_CORRECTNESS = 0.60
 # Top-k as a fraction of the corpus. Above this, retrieval stops discriminating
 # and every label agrees with every backend. See the module docstring.
 MAX_SELECTIVITY = 0.15
+# The heuristic router's cost ceiling, in backends per query. The README's
+# headline is "0.947 at 1.53 backends per query: 62% less work than fan-out",
+# and until this constant existed the cost half of that sentence was bounded
+# only by "less than fan-out", i.e. by anything under 4.00. A one-line edit
+# that sent every query to one extra leg held correctness at 0.947, kept the
+# traps at 5/5 and passed this gate at 2.26 backends per query, falsifying the
+# published saving with nothing going red. Set just above the measured 1.53 so
+# ordinary drift does not flap, and far enough below 4.00 that widening a route
+# trips it.
+MAX_HEURISTIC_FAN_OUT = 1.60
 EVAL_K = 5
 
 
@@ -171,17 +182,70 @@ def run_checks() -> list[GateResult]:
     )
 
     # 6. The fusion window must sit at or above where recall stops improving.
-    per_backend = {
-        b.backend: b.search("ERR_UPSTREAM_4423 settlement envelope", k=50)
-        for b in fed.all()
-    }
-    sweep = window_sweep(per_backend, {"runbook-err-101"})
-    plateau = next((w for w, found, _ in sweep if found > 0), None)
+    #
+    #    Over every labeled query that has document answers, it finds the
+    #    smallest window at which fusion finds all it will ever find (the
+    #    plateau the constant is supposed to sit above), and then the deepest
+    #    plateau any query needs. Sweeping one query would not do: a query
+    #    whose document both legs rank first shows recall at window 1, and
+    #    "DEFAULT_WINDOW >= 1" is true of every window anyone could set. On
+    #    this corpus q-multi-2 needs 20, which is DEFAULT_WINDOW exactly, so
+    #    the check is tight: drop the constant one step and it fails.
+    plateaus: dict[str, int] = {}
+    for q in queries:
+        if not q.relevant_docs:
+            continue
+        per_backend = {
+            b.backend: b.search(q.text, k=50) for b in fed.all()
+        }
+        sweep = window_sweep(per_backend, q.relevant_docs)
+        best = max(found for _, found, _ in sweep)
+        plateaus[q.query_id] = next(w for w, found, _ in sweep if found == best)
+
+    deepest_id = max(plateaus, key=lambda qid: plateaus[qid]) if plateaus else ""
+    deepest = plateaus.get(deepest_id, 0)
+    # `deepest > 1` is the second direction. If every query plateaued at window
+    # 1 the comparison below would be satisfied by any constant at all, and
+    # this check would have quietly stopped being able to fail again.
     results.append(
         GateResult(
             "the fusion window is deep enough to fuse what the legs return",
-            plateau is not None and DEFAULT_WINDOW >= plateau,
-            f"recall appears at window {plateau}, default is {DEFAULT_WINDOW}",
+            deepest > 1 and DEFAULT_WINDOW >= deepest,
+            f"deepest plateau is window {deepest} ({deepest_id}) over "
+            f"{len(plateaus)} queries, default is {DEFAULT_WINDOW}"
+            if deepest > 1
+            else f"NOT MEASURED: every query plateaus at window {deepest}, so "
+            f"this check cannot discriminate any value of DEFAULT_WINDOW",
+        )
+    )
+
+    # 7. The cost half of the headline. Check 5 only says fan-out costs MORE
+    #    than the heuristic, which anything under 4.00 satisfies.
+    results.append(
+        GateResult(
+            "the heuristic router still costs what the README says it costs",
+            heur.fan_out <= MAX_HEURISTIC_FAN_OUT,
+            f"{heur.fan_out:.2f} backends/query (ceiling {MAX_HEURISTIC_FAN_OUT:.2f}), "
+            f"a {1.0 - heur.fan_out / len(Backend):.0%} saving against fan-out",
+        )
+    )
+
+    # 8. Deciding and executing must agree. The reported fan-out is summed
+    #    from routing decisions; this re-derives it by actually running each
+    #    query through federated_search and counting the legs consulted, so
+    #    the published cost is one a run has actually paid.
+    executed = [
+        federated_search(fed, HeuristicRouter(fed), q.text, q.query_id)
+        for q in queries
+    ]
+    measured = measured_fan_out(executed)
+    incomplete = [r.query_id for r in executed if not r.complete]
+    results.append(
+        GateResult(
+            "the legs actually consulted match the routing decisions scored",
+            abs(measured - heur.fan_out) < 0.005 and not incomplete,
+            f"executed {measured:.2f} vs scored {heur.fan_out:.2f} backends/query"
+            + (f"; INCOMPLETE: {incomplete}" if incomplete else ""),
         )
     )
 

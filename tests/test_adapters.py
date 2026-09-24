@@ -60,7 +60,7 @@ def _docs() -> tuple[Document, ...]:
 def test_a_missing_driver_is_a_sentence_not_a_traceback(
     factory, module, package, monkeypatch
 ):
-    """The failure that broke CI on a sibling repository, pinned per adapter.
+    """A missing optional driver gives a sentence, pinned per adapter.
 
     None of these packages is in requirements.txt, so the offline suite must
     behave identically whether or not they happen to be installed. Hiding the
@@ -82,11 +82,9 @@ def test_an_adapter_with_no_client_and_no_address_says_which_is_missing():
     """A constructor that quietly connected to a default localhost would make
     an empty result look like a measurement.
 
-    BOTH REMOTE ADAPTERS, because the pre-commit log claims this fix for both
-    and only one of them was tested. Deleting the Elasticsearch guard left the
-    suite green and turned "you did not say where to connect" back into "the
-    elasticsearch package is not installed", which is verbatim the defect the
-    fix was for, restored on the untested copy.
+    Both remote adapters are checked. Testing one would leave the other free
+    to turn "you did not say where to connect" into "the elasticsearch package
+    is not installed" with the suite green.
     """
     with pytest.raises(ValueError, match="dsn or an injected connection"):
         PgVectorBackend(_docs(), HashingEmbedder(), connection=None, dsn=None)
@@ -95,7 +93,7 @@ def test_an_adapter_with_no_client_and_no_address_says_which_is_missing():
 
 
 def test_a_missing_address_is_reported_before_a_missing_driver():
-    """The ORDER is the fix. Whichever import happens to be absent on the
+    """The order matters. Whichever import happens to be absent on the
     machine must not decide which problem the operator is told about."""
     for factory in (
         lambda: PgVectorBackend(_docs(), HashingEmbedder(), connection=None, dsn=None),

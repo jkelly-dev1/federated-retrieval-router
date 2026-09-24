@@ -25,10 +25,9 @@ import math
 import re
 from typing import Iterable, Protocol, Sequence
 
-# A width of 256 is carried over from the sibling ai-data-boundary-proxy, where
-# a dimension sweep showed 64 manufactures similarity through hash collisions
-# and 256 is the smallest width where unrelated texts stop colliding on this
-# corpus size.
+# At a width of 256 the mean similarity between unrelated documents on this
+# corpus drops below 0.08; narrower widths manufacture similarity through hash
+# collisions.
 # tests/test_backends.py::test_the_dimension_is_wide_enough_to_avoid
 # _manufactured_similarity re-derives it rather than trusting it.
 DIMENSIONS = 256

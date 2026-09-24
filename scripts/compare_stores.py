@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import socket
+from urllib.parse import urlparse
 import sys
 from pathlib import Path
 
@@ -57,6 +58,24 @@ PG_DSN = os.environ.get(
 ES_URL = os.environ.get("FRR_ES_URL", "http://127.0.0.1:59200")
 
 
+def endpoint(url: str, default_port: int) -> tuple[str, int]:
+    """The (host, port) a URL or DSN actually points at.
+
+    The reachability probe must test the address the connection will use.
+    Both variables above are configurable, and a probe of 127.0.0.1 on the
+    default port would report "nothing listening on 127.0.0.1:55432" for a
+    remote FRR_PG_DSN and skip a leg it had never looked at. A reader cannot
+    tell an unreachable store from an unexamined one, and the operator who set
+    the variable is the one least likely to suspect the probe.
+
+    Falls back to the default port when the URL names none, which is what both
+    drivers do, and returns localhost for a DSN with no host (a local socket).
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    return host, parsed.port or default_port
+
+
 def listening(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -82,7 +101,8 @@ def build_pairs(corpus):
     except RuntimeError as exc:
         skipped.append(("relational / duckdb", str(exc).splitlines()[0]))
 
-    if listening("127.0.0.1", 55432):
+    pg_host, pg_port = endpoint(PG_DSN, 5432)
+    if listening(pg_host, pg_port):
         try:
             pg = PgVectorBackend(corpus.documents, embedder, dsn=PG_DSN)
             pg.load()
@@ -92,9 +112,12 @@ def build_pairs(corpus):
         except Exception as exc:  # driver missing, auth, extension absent
             skipped.append(("vector / pgvector", str(exc).splitlines()[0]))
     else:
-        skipped.append(("vector / pgvector", "nothing listening on 127.0.0.1:55432"))
+        skipped.append(
+            ("vector / pgvector", f"nothing listening on {pg_host}:{pg_port}")
+        )
 
-    if listening("127.0.0.1", 59200):
+    es_host, es_port = endpoint(ES_URL, 9200)
+    if listening(es_host, es_port):
         try:
             es = ElasticsearchBackend(corpus.documents, url=ES_URL, analyzer="matching")
             es.load()
@@ -103,7 +126,7 @@ def build_pairs(corpus):
             skipped.append(("fulltext / elasticsearch", str(exc).splitlines()[0]))
     else:
         skipped.append(
-            ("fulltext / elasticsearch", "nothing listening on 127.0.0.1:59200")
+            ("fulltext / elasticsearch", f"nothing listening on {es_host}:{es_port}")
         )
 
     return pairs, skipped

@@ -35,6 +35,7 @@ from router.gate import (
 )
 from router.backends import build_federation
 from router.metrics import score_routing
+from router.models import Backend
 from router.routing import HeuristicRouter, VectorOnlyRouter, route_all
 
 
@@ -52,7 +53,7 @@ def test_all_passing_gives_exit_zero_and_says_passed():
 
 
 def test_one_failing_check_fails_the_gate():
-    """The test the gate did not have. A single failure must produce exit 1."""
+    """A single failing check must produce exit 1."""
     code, out = _render([GateResult("a", True, "ok"), GateResult("b", False, "bad")])
     assert code == 1, "a failing check did not fail the gate"
     assert "GATE FAILED (1 of 2 checks)" in out
@@ -84,7 +85,7 @@ def test_the_real_checks_all_pass_today():
     """Separate from the verdict logic above: the shipped stack is green, and
     the count is pinned so a check cannot quietly stop being run."""
     results = run_checks()
-    assert len(results) == 9, f"expected 9 checks, got {len(results)}"
+    assert len(results) == 11, f"expected 11 checks, got {len(results)}"
     failed = [r.name for r in results if not r.passed]
     assert not failed, f"gate checks failing: {failed}"
 
@@ -99,6 +100,31 @@ def test_the_headline_routing_correctness_is_pinned_outside_the_gate():
     assert heur.correctness == pytest.approx(0.947, abs=0.001), (
         f"heuristic routing correctness moved to {heur.correctness:.3f}")
     assert heur.correctness >= MIN_ROUTING_CORRECTNESS
+
+
+def test_the_headline_fan_out_cost_is_pinned_as_tightly_as_correctness():
+    """The other half of the headline: cost is pinned as tightly as correctness.
+
+    The README's claim is "0.947 at 1.53 backends per query: 62% less work
+    than fan-out", and this project's whole argument is that a correctness
+    number without its cost beside it is not a result. A bound of
+    `heur.fan_out < fan.fan_out` allows anything under 4.00: one added line in
+    HeuristicRouter.route sending every query to the fulltext leg as well
+    leaves correctness at 0.947 and traps at 5/5 while fan-out goes to 2.26
+    and the "62% less work" sentence becomes false. So the cost gets the same
+    treatment as correctness.
+    """
+    corpus = build_corpus()
+    fed = build_federation(corpus)
+    queries = corpus.queries
+    heur = score_routing("heuristic", queries, route_all(HeuristicRouter(fed), queries))
+    assert heur.fan_out == pytest.approx(1.53, abs=0.005), (
+        f"heuristic fan-out moved to {heur.fan_out:.2f}; the README claims 1.53 "
+        f"backends per query and derives '62% less work than fan-out' from it")
+    # The published saving, recomputed rather than restated.
+    saving = 1.0 - heur.fan_out / float(len(Backend))
+    assert saving == pytest.approx(0.62, abs=0.01), (
+        f"the saving moved to {saving:.0%}; README says 62%")
 
 
 def test_the_vector_only_baseline_still_loses_outside_the_gate():

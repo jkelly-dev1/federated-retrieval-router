@@ -35,9 +35,32 @@ from router.routing import (  # noqa: E402
     VectorOnlyRouter,
     route_all,
 )
+from router.search import federated_search, measured_fan_out  # noqa: E402
 
 RULE = "=" * 78
 THIN = "-" * 78
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    """Greedy wrap. The demo output is asserted to fit eighty columns.
+
+    textwrap would do, and this is here instead because the rationale strings
+    carry bracketed token lists that textwrap's default breaking splits in
+    unhelpful places; breaking only on spaces keeps them readable.
+    """
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
 
 
 def header(corpus, fed) -> None:
@@ -101,8 +124,11 @@ def section_routing(corpus, fed) -> None:
     print(RULE)
     print(f"  {'router':14s} {'balanced':>9s} {'prod-mix':>9s} {'fan-out':>8s} {'traps':>7s}")
     reports = {}
+    rationales: dict[str, tuple[str, ...]] = {}
     for r in (HeuristicRouter(fed), FanOutRouter(), VectorOnlyRouter()):
         decisions = route_all(r, corpus.queries)
+        if r.name == "heuristic":
+            rationales = {d.query_id: d.rationale for d in decisions}
         rep = score_routing(r.name, corpus.queries, decisions)
         weighted = weighted_correctness(corpus.queries, decisions, PRODUCTION_MIX)
         reports[r.name] = rep
@@ -126,13 +152,22 @@ def section_routing(corpus, fed) -> None:
               f"{s.recall:>7.2f} {s.over_fires:>5d} {s.misses:>5d}")
     print()
     if heur.failures:
-        print("  Where it still misroutes:")
+        print("  Where it still misroutes, WITH THE FEATURE THAT FIRED:")
         for qid, req, got in heur.failures:
             q = next(x for x in corpus.queries if x.query_id == qid)
             print(f"    {qid}: needed {sorted(b.value for b in req)}, "
                   f"chose {sorted(b.value for b in got)}")
             text = q.text if len(q.text) <= 66 else q.text[:63] + "..."
             print(f"      {text}")
+            # The rationale is what a hand-written router offers: a
+            # misroute you cannot attribute to a rule is indistinguishable
+            # from a model's. Printing the set it chose without the feature
+            # that chose it leaves the reader nothing to disagree with.
+            for line in rationales.get(qid, ()):
+                wrapped = _wrap(line, 64)
+                print(f"      -> {wrapped[0]}")
+                for cont in wrapped[1:]:
+                    print(f"         {cont}")
         print()
 
 
@@ -241,6 +276,95 @@ def section_fusion(corpus, fed) -> None:
     print()
 
 
+def section_pipeline(corpus, fed) -> None:
+    """Route, consult only the chosen legs, fuse. The whole claim, executed.
+
+    Sections 2 and 5 measure the two halves separately: what a router decides,
+    and what fusion does with lists it is handed. The fusion section searches
+    every leg on every query regardless of what the router said, which is a
+    reasonable thing for a fusion demo to do and says nothing about work
+    performed. This section is the join, and it prints the legs not consulted
+    because that is where the saving is.
+    """
+    print(RULE)
+    print("6. The pipeline end to end: route, consult, fuse")
+    print(RULE)
+    router = HeuristicRouter(fed)
+    shown = ("q-exact-1", "q-agg-1", "q-multi-1")
+    for query_id in shown:
+        q = next((x for x in corpus.queries if x.query_id == query_id), None)
+        if q is None:
+            continue
+        result = federated_search(fed, router, q.text, q.query_id, k=3)
+        print(THIN)
+        text = q.text if len(q.text) <= 66 else q.text[:63] + "..."
+        print(f"  {q.query_id}  {text}")
+        print(THIN)
+        for line in result.decision.rationale:
+            # Rationales run long (the suppression messages explain a whole
+            # guard), and the demo is asserted to fit eighty columns.
+            print(f"    route     {_wrap(line, 60)[0]}")
+            for cont in _wrap(line, 60)[1:]:
+                print(f"              {cont}")
+        print(f"    consulted {sorted(b.value for b in result.consulted)}"
+              f"  ({result.backends_consulted} of {len(Backend)})")
+        print(f"    SKIPPED   {sorted(b.value for b in result.skipped) or '(none)'}")
+        for hit in result.hits:
+            who = ",".join(b.value for b in hit.contributors)
+            print(f"    {hit.rank}. {hit.doc_id:26s} {hit.fused_score:.4f}  via {who}")
+        if not result.hits:
+            print("    (no documents; this query's answer is a computed row)")
+        print()
+
+    executed = [
+        federated_search(fed, router, q.text, q.query_id) for q in corpus.queries
+    ]
+    print(f"  Over all {len(executed)} labeled queries, legs actually consulted:")
+    print(f"    heuristic  {measured_fan_out(executed):.2f} backends per query")
+    print(f"    fan-out    {float(len(Backend)):.2f} backends per query")
+    print()
+    print("  THAT FIRST NUMBER IS MEASURED, NOT ASSUMED. It counts the legs")
+    print("  this run actually searched rather than the size of the sets the")
+    print("  router produced, so a widened route shows up as work done.")
+    print()
+
+    print(THIN)
+    print("  What a partially failed fan-out looks like")
+    print(THIN)
+    print("  RRF takes a mapping and cannot tell a leg that returned nothing")
+    print("  from a leg that was never asked from a leg that raised: all three")
+    print("  are an absent key, and the merged list looks whole in every case.")
+    print("  So a failed leg is named and the answer is marked incomplete.")
+    print()
+
+    class _Unreachable:
+        backend = Backend.FULLTEXT
+
+        def name(self) -> str:
+            return "fulltext(unreachable)"
+
+        def search(self, query, k=5):
+            raise ConnectionError("connection refused")
+
+    class _OneLegDown:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def get(self, backend):
+            return _Unreachable() if backend is Backend.FULLTEXT else self.inner.get(backend)
+
+    query = "why do we keep seeing ERR_TOKEN_9101 after partner rotations"
+    degraded = federated_search(_OneLegDown(fed), FanOutRouter(), query, "q-demo", k=3)
+    print(f"  query: {query}")
+    print(f"    complete  {degraded.complete}")
+    for failure in degraded.failures:
+        print(f"    FAILED    {failure}")
+    for hit in degraded.hits:
+        who = ",".join(b.value for b in hit.contributors)
+        print(f"    {hit.rank}. {hit.doc_id:26s} {hit.fused_score:.4f}  via {who}")
+    print()
+
+
 def main() -> int:
     corpus = build_corpus()
     fed = build_federation(corpus)
@@ -250,6 +374,7 @@ def main() -> int:
     section_mix(corpus, fed)
     section_competence(corpus, fed)
     section_fusion(corpus, fed)
+    section_pipeline(corpus, fed)
     print(RULE)
     print("What this demo does NOT claim")
     print(RULE)

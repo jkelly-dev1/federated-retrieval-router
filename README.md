@@ -8,9 +8,18 @@ not whether federated retrieval works, but whether the routing decision was
 right, and what it costs to be right.
 
 A router decides which backends a question needs (vector for paraphrase, graph
-for relationships, full-text for exact terms, relational for aggregates) runs
-them concurrently, merges with reciprocal rank fusion, and returns one ranked
-list in which every item carries which leg produced it.
+for relationships, full-text for exact terms, relational for aggregates),
+queries only those, merges with reciprocal rank fusion, and returns one ranked
+list in which every item carries which leg produced it. That is
+`router/search.py`; `federated_search(fed, router, query)` is the whole
+pipeline in one call.
+
+The legs run sequentially by default and `federated_search` takes an
+`executor` if you want them concurrent. Sequential is the default because the
+four offline backends are pure Python in one process, so threading them would
+buy nothing a clock could see, and this repository reports no latency figures
+anywhere (design note 6). The executor pays off with the real store adapters,
+whose legs are network round trips.
 
 The headline is not that federation wins. It is that how much it wins by is
 mostly an assumption about your traffic.
@@ -61,9 +70,8 @@ llm-anthropic  1.000/1.000/1.000 1.000/1.000/1.000  1.21/1.21/1.21    5/5
 
 `claude-opus-5` beat the heuristic on both axes in all ten runs across both
 samples: 1.000 every time at no more than 1.21 backends per query against
-0.947 at 1.53, with zero misroutes in 190 routing decisions. The claim this
-section used to make from one sample was given ten chances to fail and did not
-take any of them.
+0.947 at 1.53, with zero misroutes in 190 routing decisions. Ten runs over two
+samples gave the claim ten chances to fail, and it did not take any of them.
 
 `gpt-5.6-terra` never exceeded the heuristic on correctness in either sample: it
 tied at 0.947 in two runs of the first and never got above 0.895 in the second.
@@ -226,7 +234,10 @@ away magnitude in exchange, which is a real cost and is stated in `fusion.py`.
 into each list as the window allows, so a document one leg ranks 12th cannot
 be fused at window 10 no matter how strongly another leg agrees, and the
 merged list looks perfectly reasonable while it happens. It is measured by
-`window_sweep` and asserted in tests rather than chosen.
+`window_sweep` over every labeled query and asserted in
+`test_the_default_window_sits_above_the_corpus_plateau` rather than chosen: the
+deepest window any query needs is 20, which is the value, so the constant is
+pinned exactly rather than loosely bounded.
 
 ## Claims backed by tests
 
@@ -306,12 +317,28 @@ merged list looks perfectly reasonable while it happens. It is measured by
 | A partial run is rejected rather than scored | `test_a_partial_run_is_rejected_rather_than_scored` |
 | Every rendered stability table fits the capture width | `test_every_rendered_table_fits_the_capture_width` |
 | A bad run count is rejected before anything is spent | `test_a_bad_run_count_is_rejected_before_anything_is_spent` |
+| Only the chosen backends are consulted | `test_only_the_chosen_backends_are_consulted` |
+| A narrower route asks strictly fewer legs than fan-out | `test_a_narrower_route_asks_strictly_fewer_legs_than_fan_out` |
+| Every fused item carries the leg that produced it | `test_the_merged_list_carries_which_leg_produced_each_item` |
+| No hit can be attributed to a leg never consulted | `test_no_hit_can_be_attributed_to_a_leg_that_was_never_consulted` |
+| A leg that raises is named, and the rest still fuse | `test_a_leg_that_raises_is_named_and_the_rest_still_fuse` |
+| A leg that legitimately found nothing is not a failure | `test_an_empty_leg_is_not_reported_as_a_failure` |
+| An executor changes who waits, not the answer | `test_an_executor_produces_identical_results_to_sequential` |
+| The legs consulted match the decisions scored | `test_measured_fan_out_equals_the_scored_fan_out` |
+| The 1.53 backends/query cost is pinned, not just bounded | `test_the_headline_fan_out_cost_is_pinned_as_tightly_as_correctness` |
+| DEFAULT_WINDOW sits above the corpus plateau | `test_the_default_window_sits_above_the_corpus_plateau` |
+| Every scorer refuses a misaligned query list, not just one | `test_every_scorer_refuses_a_misaligned_query_list` |
+| ...and still scores the aligned case | `test_the_aligned_case_still_scores` |
+| The relationship guard follows the graph it is given | `test_the_relationship_guard_follows_the_graph_it_is_given` |
+| A partial comparison names its skipped legs with no driver installed | `test_a_partial_comparison_names_every_leg_it_did_not_run_without_any_driver` |
+| ...and says nothing when nothing was skipped | `test_the_not_compared_block_is_absent_when_nothing_was_skipped` |
+| The store probe follows the configured address | `test_the_reachability_probe_follows_the_configured_address` |
 
 ## Quickstart
 
 ```
 pip install -r requirements.txt
-pytest -q                          # 136 offline, 16 skipped
+pytest -q                          # 163 passed, 16 skipped
 python -m router.gate              # the CI gate
 python scripts/run_demo.py         # the full demonstration
 ```
@@ -347,7 +374,8 @@ question
 route ....... which backends does this question SHAPE need?
     |          two guards: countable-noun, linked-entity
     v
-fan out ..... only to the chosen legs, concurrently
+fan out ..... only to the chosen legs -- sequentially by default,
+    |            concurrently if given an executor
     |
     v
 fuse ........ reciprocal rank fusion, window-bounded
@@ -388,9 +416,12 @@ answer ...... one ranked list, every item carrying its provenance
 
 7. **The heuristic router is not a model.** It is deterministic so the gate can
    depend on it. That model comparison lives in a paid capture rather than an
-   exit code, and it was run once per model; a single sample of something that
-   is not deterministic. It is reported as a capture, and nothing in the
-   repository asserts on it.
+   exit code: five routing passes per model, and the whole capture taken twice,
+   for 190 routing decisions in total. Ten runs is still a small sample of
+   something that is not deterministic, and the two samples disagree in
+   places; taking it twice is how that shows, and SAMPLE_RUN.md writes it
+   up. It is reported as a capture, and nothing in the repository
+   asserts on it.
 
 8. **19 labeled queries.** Small. Wide enough that every backend is required by
    at least four, narrow enough that per-query results are individually
@@ -442,6 +473,22 @@ store would expose; this one does not.
 Weighted RRF is exposed and unused. Picking weights needs a judgment set larger
 than this one, and tuning them against 19 queries would be fitting.
 
+Concurrent execution is exposed and unmeasured, for the same reason and stated
+the same way. `federated_search` takes an `executor` and a test asserts the
+merged list is identical with and without one, so the seam works; what is NOT
+claimed is that it is faster. Four pure-Python legs in one process are
+GIL-bound, and the two stores this repository can actually reach run on the
+same machine, so any number measured here would be a number about the machine.
+The saving the cost column reports is legs NOT QUERIED, which does not depend
+on whether the remaining ones overlap.
+
+Partial failure is handled but only shallowly. A leg that raises is named and
+the answer is marked incomplete. A leg that HANGS is not: the adapters have no
+timeout beyond their drivers' defaults, so a slow store stalls the whole query
+instead of being dropped. That is the right default for a correctness study
+and the wrong one for anything serving traffic, and closing it means choosing a
+deadline policy, which is a design decision rather than a missing line.
+
 Multi-hop answers are returned as nodes, not as explanations of the path.
 
 ## Real stores: all three legs measured
@@ -485,8 +532,7 @@ that combination cannot be rounded into "no difference".
 
 Do not skip the `n/a` on the relational row. That leg's answers are computed
 values matching no document, so document recall for it is a category error
-rather than a zero. The same rule `metrics.py` applies, and one this comparison
-got wrong on its first run (see below).
+rather than a zero. It is the same rule `metrics.py` applies (see below).
 
 The relational result was the one predicted in advance: DuckDB and the Python
 loop return the same rows with the same computed values on all 7 queries where
@@ -513,35 +559,33 @@ repository is about.
 A mirrored analyzer that is not mirroring voids the fulltext measurement, and
 the summary line does not notice. `router/embeddings.py` lowercases and *then*
 matches `[a-z0-9_]+`; Elasticsearch runs the tokenizer *before* the lowercase
-filter, so a lowercase-only character class treated every capital as a
-delimiter. `Checkout Service` was indexed as `["heckout", "ervice"]` and
-`ERR_UPSTREAM_4423` as `["_", "_4423"]`. Two offline tests asserted the analyzer
-was faithful and both passed: one compared the regex *source string* to
-`_TOKEN.pattern` (identical source, different pipeline position), the other
-checked that both legs return the same top hit for an identifier (they did; the
-query was mangled the same way as the documents). The fix is `"flags":
-"CASE_INSENSITIVE"`, and the test that settles it runs real corpus text through
-the live `_analyze` endpoint and requires the token list to equal
-`content_tokens()` on all 189 strings.
+filter, so a lowercase-only character class treats every capital as a
+delimiter: `Checkout Service` indexes as `["heckout", "ervice"]` and
+`ERR_UPSTREAM_4423` as `["_", "_4423"]`. Comparing the regex source string to
+`_TOKEN.pattern` cannot see that (identical source, different pipeline
+position), and neither can checking that both legs return the same top hit for
+an identifier, because the query is mangled the same way as the documents. The
+analyzer therefore sets `"flags": "CASE_INSENSITIVE"`, and the test that settles
+it runs real corpus text through the live `_analyze` endpoint and requires the
+token list to equal `content_tokens()` on all 189 strings.
 
-What is worth more than the fix: the headline was identical before and
-after. The broken run also reported net `+0`, also reported `5 -> 5 /5`
-answers, also reported recall `1.000 -> 1.000`. Only the agreement columns moved
-(same set `8/19` to `10/19`, same order `4/19` to `5/19`, total disagreement
-`14/45` to `12/45`). A defect that scrambled tokenization across the entire
+The headline cannot see it either. A run with the lowercase-only class reported
+the same net `+0`, the same `5 -> 5 /5` answers and the same recall
+`1.000 -> 1.000` as the correct analyzer. Only the agreement columns moved (same
+set `8/19` against `10/19`, same order `4/19` against `5/19`, total
+disagreement `14/45` against `12/45`). Tokenization scrambled across the entire
 index left the top-line number untouched, which is a direct measurement of how
 insensitive that number is, and the reason the agreement columns exist next to
 it.
 
-The comparison harness failed that standard on its first run too. It scored the
-relational leg on the 11 document-bearing queries, the ones it is not for, where
-both implementations correctly return nothing, counted 11 empty-vs-empty pairs
-as 11 agreements, and printed "the stand-in was not costing anything" from a
-comparison that had measured zero queries. Agreement is now computed only over
-queries where at least one store returned something, recall only over queries
-this leg is required for, and a comparison with nothing in it prints `NOTHING
-WAS MEASURED`. It was caught by running the thing, which is the argument for
-running it.
+The relational leg is held to the same standard. Scored on the 11
+document-bearing queries, the ones it is not for, both implementations
+correctly return nothing, and 11 empty-vs-empty pairs would read as 11
+agreements and a claim that "the stand-in was not costing anything" from a
+comparison that measured zero queries. Agreement is therefore computed only
+over queries where at least one store returned something, recall only over
+queries this leg is required for, and a comparison with nothing in it prints
+`NOTHING WAS MEASURED`.
 
 ## Scope
 

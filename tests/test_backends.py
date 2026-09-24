@@ -57,7 +57,7 @@ def test_an_identifier_does_not_absorb_trailing_punctuation():
 
 
 def test_dots_inside_identifiers_still_survive():
-    """Mutation check: the fix must not split identifiers instead."""
+    """Mutation check: trailing-dot handling must not split identifiers."""
     assert tokenize("gateway.envelope.strict") == ["gateway.envelope.strict"]
 
 
@@ -211,9 +211,10 @@ def test_the_dimension_is_wide_enough_to_avoid_manufactured_similarity(corpus):
 
     Manufactured similarity is a floor, not a spread. Comparing the top hit
     against the median does not measure it: at 32 dimensions that gap is
-    WIDER, because collisions make every score noisier in both directions. The quantity that actually degrades is how alike UNRELATED
-    documents look, which rises as the width falls and puts a floor under the
-    vector leg's false-positive rate.
+    wider, because collisions make every score noisier in both directions.
+    The quantity that actually degrades is how alike unrelated documents look,
+    which rises as the width falls and puts a floor under the vector leg's
+    false-positive rate.
 
     Measured background similarity between unrelated document pairs:
 

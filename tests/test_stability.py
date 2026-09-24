@@ -415,12 +415,11 @@ def test_no_runs_at_all_is_not_a_measurement():
 
 
 def test_a_capture_can_be_re_rendered_without_paying_for_it_again():
-    """The fix for a defect that cost real money.
+    """The capture can be re-rendered from its stored decisions.
 
     The tables are rendered from decisions, so the decisions are dumped beside
-    the capture. A later session that wants different wording re-renders from
-    the same evidence instead of buying another 190 completions, which is
-    exactly what a wording change cost once.
+    the capture. A change of wording re-renders from the same evidence instead
+    of buying another 190 completions.
     """
     queries = _queries()
     runs = [

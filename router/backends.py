@@ -44,8 +44,7 @@ def _rank(scored: list[tuple[str, float, str]], backend: Backend, k: int) -> lis
     """Sort, truncate, and assign 1-based ranks.
 
     Ties break on doc_id so two runs order identically. An unstable ordering
-    would make the gate flap for reasons unrelated to any routing decision,
-    which is the same failure the sibling repos guard against.
+    would make the gate flap for reasons unrelated to any routing decision.
     """
     scored = [s for s in scored if s[1] > 0.0]
     scored.sort(key=lambda s: (-s[1], s[0]))

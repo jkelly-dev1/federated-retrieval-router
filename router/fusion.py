@@ -21,8 +21,9 @@ can only see as deep into each list as `window` allows. A document a backend
 ranks 12th cannot be fused at all at window 10, no matter how strongly a second
 backend agrees with it, and the failure is silent, because the merged list
 looks perfectly reasonable. `window_sweep` re-derives the value on this corpus
-and tests/test_routing.py::test_the_window_sweep_reports_where_recall_appears
-asserts the chosen default sits above the point where recall stops improving.
+and tests/test_routing.py::test_the_default_window_sits_above_the_corpus_plateau
+asserts the chosen default sits above the deepest point, over every labeled
+query, at which fusion stops finding more.
 """
 from __future__ import annotations
 
