@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from router.backends import build_federation  # noqa: E402
 from router.corpus import PRODUCTION_MIX, build_corpus  # noqa: E402
-from router.embeddings import content_tokens  # noqa: E402
 from router.fusion import (  # noqa: E402
     DEFAULT_WINDOW,
     reciprocal_rank_fusion,
@@ -24,6 +23,7 @@ from router.fusion import (  # noqa: E402
     window_sweep,
 )
 from router.metrics import (  # noqa: E402
+    paraphrase_overlap,
     score_routing,
     validate_competences,
     weighted_correctness,
@@ -228,8 +228,10 @@ def section_competence(corpus, fed) -> None:
     print("  shares even one RARE term with its target -- 'dependency',")
     print("  'backoff', 'twice' -- BM25's idf carries more signal than the whole")
     print("  vector carries cosine, so the fulltext leg wins queries the vector")
-    print("  leg is supposed to own. Measured overlap on those queries is 0.02")
-    print("  to 0.10, so they are genuine paraphrases and the win is real.")
+    print("  leg is supposed to own. Measured overlap across the vector-required")
+    low, high = paraphrase_overlap(corpus.queries, corpus.by_id)
+    print(f"  queries is {low:.2f} to {high:.2f}, so they are genuine paraphrases and the")
+    print("  win is real.")
     print()
     print("  `required` is therefore a DESIGNED ground truth about question")
     print("  shape, not a claim about which store wins here. Scoring routing")
@@ -266,7 +268,8 @@ def section_fusion(corpus, fed) -> None:
     print("  Window sweep: how deep fusion has to look")
     print(THIN)
     print(f"  {'window':>7s} {'relevant found':>15s} {'fused size':>11s}")
-    for w, found, size in window_sweep(per_backend, {"runbook-err-102"}):
+    for w, found, size in window_sweep(per_backend, {"runbook-err-102"},
+                                       windows=(1, 2, 3, 5, 10, 20, 50)):
         print(f"  {w:>7d} {found:>15d} {size:>11d}")
     print()
     print(f"  DEFAULT_WINDOW is {DEFAULT_WINDOW}. A document one leg ranks deep")

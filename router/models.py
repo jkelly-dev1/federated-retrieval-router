@@ -1,7 +1,7 @@
 """Domain types for the federated retrieval router.
 
 Three distinctions in this file carry the project, and getting the vocabulary
-wrong here is how the measurement quietly stops meaning anything.
+wrong here is how the measurement silently stops meaning anything.
 
 1. BACKEND vs COMPETENCE. A backend is a store with a retrieval mechanism. A
    competence is the QUESTION SHAPE that mechanism is actually good at. Four
@@ -64,8 +64,8 @@ class Competence(str, Enum):
 class Document:
     """A retrievable unit. Every backend indexes the same corpus differently.
 
-    One corpus, four indexes, on purpose. A federated router evaluated against
-    four DIFFERENT corpora measures nothing but which corpus was easiest. Every
+    One corpus, four indexes. A federated router evaluated against four
+    DIFFERENT corpora measures nothing but which corpus was easiest. Every
     backend here sees the same documents and differs only in what it can do
     with them.
     """
@@ -211,10 +211,10 @@ class RoutingDecision:
     def is_correct(self, labeled: LabeledQuery) -> bool:
         """Correct means: every REQUIRED backend was chosen.
 
-        Deliberately not "chosen == required". Choosing a superset still
-        answers the question; it just costs more, and cost is reported
-        separately as fan-out rather than folded into a correctness number.
-        Conflating the two produces a metric that cannot distinguish a router
-        that is wrong from a router that is merely expensive.
+        Not "chosen == required". Choosing a superset still answers the
+        question; it just costs more, and cost is reported separately as
+        fan-out rather than folded into a correctness number. Conflating the
+        two produces a metric that cannot distinguish a router that is wrong
+        from a router that is merely expensive.
         """
         return labeled.required <= self.chosen

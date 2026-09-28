@@ -1,7 +1,7 @@
 """Scoring the routing decision, which is the thing this project measures.
 
 The trap this file exists to avoid. It is easy to evaluate a federated router
-by end-to-end retrieval quality and call it done. That number moves for reasons
+by whole-pipeline retrieval quality and call it done. That number moves for reasons
 that have nothing to do with routing, a better embedder, a luckier corpus, a
 different k, and it cannot distinguish a router that chose correctly from one
 that fanned out to everything. So routing is scored on its own axis, per
@@ -36,9 +36,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
-from router.models import Backend, LabeledQuery, RoutingDecision
+from router.embeddings import content_tokens
+from router.models import Backend, Document, LabeledQuery, RoutingDecision
 
 
 @dataclass(frozen=True)
@@ -233,7 +234,7 @@ class CompetenceCheck:
     The honest bridge between the designed labels and what the stack does. A
     row where `designed` is not in `measured` is not a labeling error: it is a
     backend failing at its own competence, and reporting it as that beats
-    quietly relabeling until the two agree.
+    silently relabeling until the two agree.
     """
 
     query_id: str
@@ -248,6 +249,29 @@ class CompetenceCheck:
     @property
     def nobody_wins(self) -> bool:
         return not self.measured
+
+
+def paraphrase_overlap(
+    queries: Sequence[LabeledQuery],
+    by_id: Callable[[str], Document],
+) -> tuple[float, float]:
+    """Lowest and highest token jaccard between a vector-required query and
+    each of its relevant documents.
+
+    Low overlap is what makes a semantic query a paraphrase rather than a
+    keyword query, so the demo prints this range from the corpus instead of
+    stating it.
+    """
+    overlaps = []
+    for q in queries:
+        if Backend.VECTOR not in q.required or not q.relevant_docs:
+            continue
+        qt = set(content_tokens(q.text))
+        for doc_id in q.relevant_docs:
+            doc = by_id(doc_id)
+            dt = set(content_tokens(f"{doc.title} {doc.text}"))
+            overlaps.append(len(qt & dt) / len(qt | dt))
+    return min(overlaps), max(overlaps)
 
 
 def validate_competences(

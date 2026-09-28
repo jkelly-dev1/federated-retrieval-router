@@ -24,7 +24,7 @@ payments have in Q1" cannot be retrieved. It can only be computed. A vector
 store will happily return the three most incident-shaped documents and a naive
 evaluation will call that a hit.
 
-And the Corpus contains traps on purpose. A query set with no traps measures a
+And the Corpus contains traps. A query set with no traps measures a
 router on the easy half of the problem, so several questions here look like one
 competence and are another. An error code that is actually a semantic question,
 a "how many" that is actually a lookup. They are marked, and the metrics report
@@ -382,7 +382,7 @@ def _general_designs() -> tuple[Document, ...]:
                 )
             )
     # The walk can repeat a (topic, service) pair; ids are unique by
-    # construction so dedup on the id rather than trusting the arithmetic.
+    # construction so dedup on the id instead of trusting the arithmetic.
     seen: dict[str, Document] = {}
     for doc in out:
         seen.setdefault(doc.doc_id, doc)
@@ -747,7 +747,7 @@ def labeled_queries() -> tuple[LabeledQuery, ...]:
 #
 # These weights are an ASSUMPTION, not a measurement. They are stated here so a
 # reader can substitute their own, and the demo reports both scorings side by
-# side rather than picking one.
+# side instead of picking one.
 PRODUCTION_MIX: dict[Competence, float] = {
     Competence.SEMANTIC: 0.70,
     Competence.EXACT_TERM: 0.20,

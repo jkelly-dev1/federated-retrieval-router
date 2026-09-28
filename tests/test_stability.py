@@ -374,7 +374,7 @@ def test_a_cheaper_router_that_is_not_more_correct_does_not_survive():
     only where VECTOR is the required backend). Clear on cost, not clear on
     correctness: the exact shape `and` exists to reject and `or` would wave
     through. The two assertions below check that the fixture really is in that
-    state before the verdict is asserted, so this cannot quietly decay into
+    state before the verdict is asserted, so this cannot silently decay into
     the degenerate case again.
     """
     queries = _queries()
@@ -512,3 +512,48 @@ def test_a_deterministic_router_says_so_in_its_detail_block():
     corpus, stats = _wide_stats()
     block = "\n".join(render_unstable_detail(stats[1], corpus.queries))
     assert "identical across all 5 runs" in block
+
+
+def test_a_tie_for_least_stable_is_broken_the_same_way_and_listed():
+    """Two queries each got two backend sets with the same fan-out range. The
+    column names the lower query id, in every process, and `tied_worst`
+    names both, so a reader of the column is not told one was the worst."""
+    queries = _queries()
+    runs = [
+        _run(queries, [VECTOR, FULLTEXT, FULLTEXT]),
+        _run(queries, [FULLTEXT, VECTOR, VECTOR]),
+    ]
+    stat = summarize_runs("llm", queries, runs, PRODUCTION_MIX)
+    assert stat.worst_query.query_id == "q-exact-1"
+    assert stat.tied_worst == ("q-exact-1", "q-sem-1", "q-trap-1")
+
+
+def test_the_per_query_table_names_the_queries_tied_for_least_stable():
+    """The column has room for one query. When others are exactly as
+    unstable, the table names them on the next line; without it a reader of
+    the column takes one of several equals for the worst."""
+    queries = _queries()
+    runs = [
+        _run(queries, [VECTOR, FULLTEXT, FULLTEXT]),
+        _run(queries, [FULLTEXT, VECTOR, VECTOR]),
+    ]
+    tied = summarize_runs("llm", queries, runs, PRODUCTION_MIX)
+    lines = render_per_query_table([tied])
+    row = next(i for i, line in enumerate(lines) if line.startswith("  llm "))
+    assert "q-exact-1: 2 sets" in lines[row]
+    assert lines[row + 1].strip() == "tied with q-sem-1, q-trap-1"
+
+    one = [runs[0], _run(queries, [FULLTEXT, FULLTEXT, FULLTEXT])]
+    alone = summarize_runs("llm", queries, one, PRODUCTION_MIX)
+    assert alone.worst_query is not None
+    assert not any("tied with" in line
+                   for line in render_per_query_table([alone]))
+
+
+def test_the_tie_break_puts_a_prefix_id_before_the_longer_one():
+    """`_desc` negates each character, so without its trailing sentinel a
+    prefix ("q-1") would sort AFTER the id it starts ("q-10") and max() would
+    name the higher id, the opposite of the documented tie-break."""
+    from router.stability import _desc
+    assert max(["q-10", "q-1", "q-2"], key=_desc) == "q-1"
+    assert max(["q-multi-2", "q-trap-3"], key=_desc) == "q-multi-2"

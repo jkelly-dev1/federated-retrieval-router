@@ -11,11 +11,10 @@ cannot be wrong, and including it is not a formality: a fan-out router scores
 100% on routing correctness by construction, so any correctness number reported
 without its cost beside it is meaningless. It is here to make that visible.
 
-`HeuristicRouter` decides from surface features. It is deliberately NOT a
-model: it is deterministic, it runs offline, it can be reasoned about when it
-fails, and the gate can depend on it. A model-based router is measured against
-it in the paid capture, which is the honest place for a nondeterministic
-component.
+`HeuristicRouter` decides from surface features. It is NOT a model: it is
+deterministic, it runs offline, it can be reasoned about when it fails, and the
+gate can depend on it. A model-based router is measured against it in the paid
+capture, which is the honest place for a nondeterministic component.
 
 The two guards below are the engineering, and whether they generalize is the
 measurement. Both were written against a named trap in the labeled set:
@@ -62,6 +61,11 @@ RELATIONSHIP_TELLS = (
 # Nouns the relational store can actually aggregate over. THE GUARD: an
 # aggregate tell with none of these present is a figure of speech.
 COUNTABLE = ("incident", "incidents", "outage", "outages", "quarter", "quarters")
+
+def _word_in(term: str, text: str) -> bool:
+    """`term` as a whole word or phrase: "sum" is not in "summarize"."""
+    return re.search(r"\b" + re.escape(term) + r"\b", text) is not None
+
 
 # An identifier: SCREAMING_SNAKE or dotted.lower.path. These are the tokens an
 # embedding cannot place and an inverted index finds instantly.
@@ -143,9 +147,11 @@ class HeuristicRouter:
             why.append(f"identifier token(s) {identifiers[:2]} -> fulltext")
 
         # --- aggregate, behind the countable-noun guard -----------------
-        agg_tell = next((t for t in AGGREGATE_TELLS if t in lowered), None)
+        agg_tell = next((t for t in AGGREGATE_TELLS if _word_in(t, lowered)),
+                        None)
         if agg_tell:
-            countable = next((c for c in COUNTABLE if c in lowered), None)
+            countable = next((c for c in COUNTABLE if _word_in(c, lowered)),
+                             None)
             if countable:
                 chosen.add(Backend.RELATIONAL)
                 competences.add(Competence.AGGREGATE)

@@ -83,7 +83,7 @@ def test_the_verdict_follows_the_checks_and_not_their_number(passed):
 
 def test_the_real_checks_all_pass_today():
     """Separate from the verdict logic above: the shipped stack is green, and
-    the count is pinned so a check cannot quietly stop being run."""
+    the count is pinned so a check cannot silently stop being run."""
     results = run_checks()
     assert len(results) == 11, f"expected 11 checks, got {len(results)}"
     failed = [r.name for r in results if not r.passed]

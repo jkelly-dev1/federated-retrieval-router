@@ -63,7 +63,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python -m router.gate
 
-      # The demo is the offline end-to-end path. Running it in CI keeps
+      # The demo is the offline whole-pipeline path. Running it in CI keeps
       # SAMPLE_RUN.md honest: if the demo breaks, the build breaks.
       - name: Demo (offline mock)
         env:
@@ -122,7 +122,7 @@ jobs:
           pip install -r requirements.txt -r requirements-integration.txt
 
       # -rs prints the skip reasons. If a service failed to come up, the log
-      # says which one instead of showing a quietly green run of nothing.
+      # says which one instead of showing a silently green run of nothing.
       - name: Integration tests against real stores
         env:
           PYTHONPATH: ${{ github.workspace }}

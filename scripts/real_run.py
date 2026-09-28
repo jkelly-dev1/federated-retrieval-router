@@ -13,7 +13,7 @@ exception and it exists for exactly three measurements:
      bag-of-tokens model loses a genuine paraphrase to one rare shared term.
      A semantic model should take those back. The corpus is embedded TWICE,
      through two cold caches, because a capture that cannot say whether its
-     own numbers reproduce is asserting reproducibility rather than measuring
+     own numbers reproduce is asserting reproducibility instead of measuring
      it.
 
   2. Does a model route better than two hand-written guards? Scored on the same
@@ -27,7 +27,7 @@ exception and it exists for exactly three measurements:
      without its spread is not a result, that will not do. See
      router/stability.py.
 
-It refuses to run when nothing real is configured, rather than producing a file
+It refuses to run when nothing real is configured, instead of producing a file
 that looks like a paid capture and is not.
 
 Model replies are quoted exactly as returned. Everything else in this
@@ -288,9 +288,9 @@ def section_routing(corpus, providers, runs) -> None:
 def section_cost(providers, extra_embedders=()) -> None:
     """Every embedder that billed, including the repeat pass's own.
 
-    The repeat exists to pay for a second copy of the corpus on purpose, so
-    leaving it out of the cost section would understate the run by exactly the
-    thing the section above is measuring.
+    The repeat exists to pay for a second copy of the corpus, so leaving it out
+    of the cost section would understate the run by exactly the thing the
+    section above is measuring.
     """
     print(RULE)
     print("3. What the run consumed, from the vendors' own usage fields")

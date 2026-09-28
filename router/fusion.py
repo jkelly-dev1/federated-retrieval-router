@@ -1,4 +1,4 @@
-"""Reciprocal rank fusion, and the constant that quietly decides its results.
+"""Reciprocal rank fusion, and the constant that silently decides its results.
 
 RRF scores a document as the sum over result lists of 1 / (K + rank). It is the
 default for hybrid retrieval for a good reason and it has a specific,
@@ -39,9 +39,13 @@ from router.models import Backend, FusedHit, RankedHit
 # evaluation rather than improve the retriever.
 RANK_CONSTANT = 60
 
-# How deep into each backend's list fusion looks. Re-derived by `window_sweep`
-# and asserted in tests. Small windows are the classic silent failure: a
-# document one leg ranks deep and another ranks first never gets the benefit.
+# How deep into each backend's list fusion looks. `window_sweep`, over every
+# window from 1 to 50 on 50-deep lists, puts the deepest need at 12, and tests
+# assert the default sits at or above it. Small windows are the classic silent
+# failure: a document one leg ranks deep and another ranks first never gets the
+# benefit. federated_search asks each leg for DEFAULT_K results, fewer than
+# either number, so in the shipped pipeline the window does not bind; it binds
+# when a caller asks the legs for deeper lists.
 DEFAULT_WINDOW = 20
 
 
@@ -89,7 +93,7 @@ def reciprocal_rank_fusion(
 def window_sweep(
     per_backend: Mapping[Backend, Sequence[RankedHit]],
     relevant: Iterable[str],
-    windows: Sequence[int] = (1, 2, 3, 5, 10, 20, 50),
+    windows: Sequence[int] = tuple(range(1, 51)),
     k: int = 10,
 ) -> list[tuple[int, int, int]]:
     """(window, relevant found, total fused) for each window.

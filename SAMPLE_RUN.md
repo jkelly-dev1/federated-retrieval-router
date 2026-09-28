@@ -2,11 +2,13 @@
 
 Verbatim captures of `scripts/run_demo.py`, the gate and the test suite, so a
 reviewer without an API key can see exactly what this project measures and what
-it refuses to claim. Nothing here is retyped or cleaned up. Offline captures
-2026-09-13; the paid capture 2026-08-03.
+it refuses to claim. The command output blocks are not retyped or cleaned up.
+Demo and gate captures are from 2026-09-24; the test block is from
+2026-09-27, run with the optional drivers made unimportable; the store
+comparison is from 2026-08-04; the paid capture is from 2026-08-03.
 
-The offline captures are newer than the paid one. All three offline blocks
-come from one run of the current tree. The paid capture keeps its own date
+The offline captures are newer than the paid one. All of the demo, gate and
+test blocks come from the current tree. The paid capture keeps its own date
 because it was not re-run: it costs money, and re-running it would replace a
 measurement, not refresh a transcription.
 
@@ -176,8 +178,9 @@ federated-retrieval-router demo
   shares even one RARE term with its target -- 'dependency',
   'backoff', 'twice' -- BM25's idf carries more signal than the whole
   vector carries cosine, so the fulltext leg wins queries the vector
-  leg is supposed to own. Measured overlap on those queries is 0.02
-  to 0.10, so they are genuine paraphrases and the win is real.
+  leg is supposed to own. Measured overlap across the vector-required
+  queries is 0.02 to 0.10, so they are genuine paraphrases and the
+  win is real.
 
   `required` is therefore a DESIGNED ground truth about question
   shape, not a claim about which store wins here. Scoring routing
@@ -237,7 +240,7 @@ federated-retrieval-router demo
 ------------------------------------------------------------------------------
   q-agg-1  how many incidents did payments have in 2026
 ------------------------------------------------------------------------------
-    route     aggregate tell 'how many' + countable 'incident'
+    route     aggregate tell 'how many' + countable 'incidents'
     route     4 prose token(s) -> vector
     consulted ['relational', 'vector']  (2 of 4)
     SKIPPED   ['fulltext', 'graph']
@@ -248,7 +251,7 @@ federated-retrieval-router demo
 ------------------------------------------------------------------------------
   q-multi-1  how many incidents touched services owned by the money team in ...
 ------------------------------------------------------------------------------
-    route     aggregate tell 'how many' + countable 'incident'
+    route     aggregate tell 'how many' + countable 'incidents'
     route     relationship tell 'owned by' + linked ['money']
     route     6 prose token(s) -> vector
     consulted ['graph', 'relational', 'vector']  (3 of 4)
@@ -320,7 +323,7 @@ federated-retrieval-router gate: deterministic mock, offline
   [PASS] the traps still trap a single-store baseline                    vector-only 2/5, heuristic 5/5
   [PASS] the query mix still changes the verdict                         vector-only 0.263 balanced vs 0.634 prod-mix, a 2.4x swing
   [PASS] the offline embedder still loses paraphrases to BM25            designed backend wins 7/11; a clean sweep would mean the mock got semantic or the queries stopped being paraphrases
-  [PASS] the fusion window is deep enough to fuse what the legs return   deepest plateau is window 20 (q-multi-2) over 11 queries, default is 20
+  [PASS] the fusion window covers the deepest 50-deep plateau            deepest plateau is window 12 (q-multi-2) over 11 queries, default is 20
   [PASS] the heuristic router still costs what the README says it costs  1.53 backends/query (ceiling 1.60), a 62% saving against fan-out
   [PASS] the legs actually consulted match the routing decisions scored  executed 1.53 vs scored 1.53 backends/query
 
@@ -337,24 +340,26 @@ pytest -q
 ```
 
 ```
-....................................................sss................. [ 40%]
-........sssssssssssss................................................... [ 80%]
-...................................                                      [100%]
-163 passed, 16 skipped in 1.82s
+............................................................sss......... [ 36%]
+.................sssssssssssssss........................................ [ 73%]
+....................................................                     [100%]
+178 passed, 18 skipped in 1.79s
 ```
 
-That capture is from a fresh virtual environment holding nothing but `pytest`.
-The `pip install -r requirements.txt && pytest` path a reader would take. The
-suite installs no optional dependency and makes no network call.
+That capture is the suite run with `duckdb`, `psycopg`, `elasticsearch`,
+`openai` and `anthropic` made unimportable, which is what a fresh environment
+holding only `pytest` gives: the `pip install -r requirements.txt && pytest`
+path a reader would take. The suite installs no optional dependency and makes
+no network call.
 
-Its 16 skips are the design, not a gap. Thirteen are the real-store integration
+Its 18 skips are the design, not a gap. Fifteen are the real-store integration
 tests in `tests/test_integration.py` and three are the partial- comparison tests
 in `tests/test_compare_stores.py`. All of them skip with a reason naming what
 was missing instead of failing because a container is not running. A red suite
 that means "you did not start Docker" teaches people to ignore red suites.
 
 In the development environment, where `duckdb` is installed, the same suite
-reports 172 passed, 7 skipped: the six DuckDB integration tests and the three
+reports 189 passed, 7 skipped: the eight DuckDB integration tests and the three
 partial-comparison tests run instead of skipping, and the seven that need
 pgvector or Elasticsearch containers still skip. Same tests, different
 environment, and the difference is visible in the count rather than hidden.
@@ -580,20 +585,27 @@ came out `HOLDS` both times. `gpt-5.6-terra` never once exceeded the heuristic
 on correctness in either sample. The embedder returned non-identical vectors for
 byte-identical input in both, at about the same rate.
 
+(`audit/` is gitignored, so `audit/routing_decisions.json` is not published,
+and each paid run writes to that same path: the first sample's decisions were
+replaced by the second's.)
+
 What did not. The per-query stability numbers moved, and one of them moved to a
 different query entirely. `claude-opus-5` was unstable on 2 of 19 queries in the
 first sample and on none at all in the second. `gpt-5.6-terra`'s least stable
-query was `q-trap-3` the first time and `q-multi-2` the second.
+query was `q-trap-3` the first time; the second time `q-trap-3` and
+`q-multi-2` were tied, and the column named `q-multi-2`.
 
 So the first sample supported a story that the second one does not. After the
 first run it was true, and tempting, to write that both models were least
 stable on `q-trap-3`; the config-key query the linked-entity guard was written
 for. It is a good story. It did not survive the next five runs: in the second
-sample `claude-opus-5` was stable on everything, and `gpt-5.6-terra` flipped on
-a different query. Five runs are enough to show that a router is not
-deterministic. They are not enough to say which question it will be unreliable
-about. That distinction is now stated in the README rather than learned by a
-reader who runs it again.
+sample `claude-opus-5` was stable on everything, while `gpt-5.6-terra` flipped
+on `q-trap-3` again and on `q-multi-2` as well.
+
+Five runs are enough to show that a router is not deterministic. They are not
+enough to say which question every model will be unreliable about. That
+distinction is now stated in the README rather than learned by a reader who runs
+it again.
 
 The claims that survive both samples are the ones about the ROUTER: opus-5
 holding 1.000 at low fan-out, gpt-5.6-terra never getting ahead of two `if`
@@ -633,7 +645,7 @@ federated-retrieval-router STORE COMPARISON
   n/a means this leg answers with computed values that match no
   document, so document overlap is a category error rather than a
   zero. AGREEMENT IS OVER THE QUERIES WHERE EITHER STORE RETURNED
-  ANYTHING: two stores that both returned nothing have not agreed.
+  ANYTHING -- two stores that both returned nothing have not agreed.
 
   leg               answers          recall@k   same set  same order
   relational            n/a    n/a (computed)        7/7         7/7
@@ -793,7 +805,7 @@ count that nobody retrieves from 2 to 1. Two specific queries came back:
 `q-sem-1`, where the vector leg finally joins the fulltext leg it was losing to,
 and `q-trap-5`, which no backend could retrieve at all offline. The residual is
 what to read. `q-sem-2` still goes to fulltext with a real semantic model in
-place: a genuine paraphrase, measured overlap 0.02 to 0.10, and BM25's idf on
+place: a genuine paraphrase, measured overlap 0.04 to 0.05, and BM25's idf on
 one rare shared term still beats cosine. The convenient reading was that the
 mock was the whole problem. It was most of it.
 

@@ -153,6 +153,45 @@ def test_the_semantic_queries_are_genuine_paraphrases(corpus):
             )
 
 
+def test_the_published_competence_figures_are_the_measured_ones(corpus, fed):
+    """The README states the offline competence gap in figures: the jaccard
+    range, how many document-bearing queries the designed backend wins, how
+    many nobody retrieves, and how many disagree. Each one is measured here
+    and looked up in the README, so an edit to a query or to the README that
+    moves one without the other fails."""
+    from pathlib import Path
+
+    from router.metrics import paraphrase_overlap, validate_competences
+
+    low, high = paraphrase_overlap(corpus.queries, corpus.by_id)
+    retrieved = {
+        q.query_id: {
+            b.backend: [h.doc_id for h in b.search(q.text, k=3)] for b in fed.all()
+        }
+        for q in corpus.queries
+    }
+    checks = validate_competences(corpus.queries, retrieved, k=3)
+    n = len(checks)
+    wins = sum(1 for c in checks if c.designed_wins)
+    nobody = sum(1 for c in checks if c.nobody_wins)
+    assert (f"{low:.2f}", f"{high:.2f}") == ("0.02", "0.10")
+    assert (n, wins, nobody) == (11, 7, 2)
+
+    readme = " ".join(
+        (Path(__file__).resolve().parents[1] / "README.md").read_text().split()
+    )
+    for sentence in (
+        f"queries with a document answer {n}",
+        f"designed backend actually wins {wins}",
+        f"no backend retrieves the answer {nobody}",
+        f"vector-required queries is {low:.2f} to {high:.2f}",
+        f"of {n} rather than {wins}",
+        f"nobody retrieves falls from {nobody}",
+        f"disagree on {n - wins} of {n} document-bearing queries",
+    ):
+        assert sentence in readme, sentence
+
+
 # --------------------------------------------------------------- the graph
 
 

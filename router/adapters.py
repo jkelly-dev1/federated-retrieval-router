@@ -34,15 +34,14 @@ to k1=1.2, b=0.75 in both.
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
-from router.backends import DEFAULT_K, _rank
-# _TOKEN is private and imported anyway, on purpose: the mapping must not hold
-# a COPY of the pattern that can drift from the one the in-memory leg uses. A
-# copied string is what a test can only check for equality after the fact; a
-# shared object cannot diverge at all.
+from router.backends import DEFAULT_K, RelationalScope, _rank, parse_relational_query
+# _TOKEN is private and imported anyway: the mapping must not hold a COPY of
+# the pattern that can drift from the one the in-memory leg uses. A copied
+# string is what a test can only check for equality after the fact; a shared
+# object cannot diverge at all.
 from router.embeddings import STOPWORDS, _TOKEN, Embedder, content_tokens
 from router.models import Backend, Document, RankedHit
 
@@ -95,11 +94,11 @@ class PgVectorBackend:
     def __post_init__(self) -> None:
         if self.connection is not None:
             return
-        # Configuration is checked before the driver, deliberately. "You did
-        # not say where to connect" is true whether or not psycopg is
-        # installed, and installing psycopg would not fix it. Reporting the
-        # import failure first sends the reader to the wrong problem, and it
-        # also makes the error depend on what happens to be on the machine.
+        # Configuration is checked before the driver. "You did not say where to
+        # connect" is true whether or not psycopg is installed, and installing
+        # psycopg would not fix it. Reporting the import failure first sends
+        # the reader to the wrong problem, and it also makes the error depend
+        # on what happens to be on the machine.
         if not self.dsn:
             raise ValueError("PgVectorBackend needs a dsn or an injected connection")
         try:
@@ -337,8 +336,8 @@ class DuckDBBackend:
     decides WHICH aggregate to compute, and that layer is unchanged here on
     purpose. Moving it too would confound the store swap with a parser swap.
 
-    So this adapter reuses the same surface-form sniffing as the in-memory leg
-    and differs only in who executes the arithmetic.
+    So this adapter calls the same `parse_relational_query` as the in-memory
+    leg and differs only in who executes the arithmetic.
     """
 
     documents: tuple[Document, ...]
@@ -376,35 +375,32 @@ class DuckDBBackend:
             )
         return len(rows)
 
-    # -- the same sniffing the in-memory leg does, deliberately unchanged ---
+    # -- the scope comes from the parser the in-memory leg calls ---
 
-    def _scope(self, query: str) -> tuple[str, list, Optional[str], Optional[str]]:
-        lowered = query.lower()
-        year = "2026" if "2026" in lowered else None
-        quarters = re.findall(r"20\d\d\s*q[1-4]", lowered.replace(" ", ""))
-        services = {d.service for d in self.rows() if d.service}
-        service = next((s for s in sorted(services) if s in lowered), None)
-
+    def _scope(self, query: str) -> tuple[str, list, RelationalScope]:
+        scope = parse_relational_query(
+            query, (d.service for d in self.rows() if d.service)
+        )
         where = ["1=1"]
         params: list = []
-        if service:
+        if scope.service:
             where.append("service = ?")
-            params.append(service)
-        if quarters:
-            placeholders = ",".join("?" for _ in quarters)
+            params.append(scope.service)
+        if scope.quarters:
+            placeholders = ",".join("?" for _ in scope.quarters)
             where.append(f"lower(quarter) IN ({placeholders})")
-            params.extend(quarters)
-        elif year:
+            params.extend(scope.quarters)
+        if scope.year:
             where.append("quarter LIKE ?")
-            params.append(f"{year}%")
-        return " AND ".join(where), params, service, quarters[0] if quarters else year
+            params.append(f"{scope.year}%")
+        return " AND ".join(where), params, scope
 
     def search(self, query: str, k: int = DEFAULT_K) -> list[RankedHit]:
-        lowered = query.lower()
-        where, params, service, window = self._scope(query)
+        where, params, scope = self._scope(query)
+        service, window = scope.service, scope.window
         results: list[tuple[str, float, str]] = []
 
-        if any(w in lowered for w in ("average", "mean", "avg")):
+        if scope.wants_mean:
             row = self.connection.execute(
                 f"SELECT avg(minutes_to_resolve), count(*) FROM {self.table} "
                 f"WHERE {where}",
@@ -416,7 +412,7 @@ class DuckDBBackend:
                     1.0,
                     f"mean minutes_to_resolve = {row[0]:.1f} over {row[1]} rows",
                 ))
-        if any(w in lowered for w in ("longest", "max", "worst", "slowest")):
+        if scope.wants_max:
             row = self.connection.execute(
                 f"SELECT doc_id, minutes_to_resolve FROM {self.table} "
                 f"WHERE {where} ORDER BY minutes_to_resolve DESC, doc_id LIMIT 1",
@@ -427,7 +423,7 @@ class DuckDBBackend:
                     f"agg:max_minutes:{row[0]}", 1.0,
                     f"max minutes_to_resolve = {row[1]} ({row[0]})",
                 ))
-        if "per quarter" in lowered or "by quarter" in lowered:
+        if scope.wants_per_quarter:
             for quarter, count in self.connection.execute(
                 f"SELECT quarter, count(*) FROM {self.table} WHERE {where} "
                 f"GROUP BY quarter ORDER BY quarter",
@@ -437,9 +433,7 @@ class DuckDBBackend:
                     (f"agg:count:{quarter or 'unknown'}", 1.0,
                      f"{quarter} = {count} incidents")
                 )
-        if not results and any(
-            w in lowered for w in ("how many", "count", "number of", "total")
-        ):
+        if not results and scope.wants_count:
             row = self.connection.execute(
                 f"SELECT count(*) FROM {self.table} WHERE {where}", params
             ).fetchone()

@@ -11,9 +11,9 @@ integration test that only asserts "some documents came back".
 The integration tests that DO need servers live in tests/test_integration.py
 and skip themselves when nothing is listening.
 
-Every driver import here is absent on purpose: the fixtures inject fakes, so
-this file behaves identically on a laptop with psycopg installed and in CI
-where it is not.
+Every driver import here is absent: the fixtures inject fakes, so this file
+behaves identically on a laptop with psycopg installed and in CI where it is
+not.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def test_a_missing_driver_is_a_sentence_not_a_traceback(
 
 
 def test_an_adapter_with_no_client_and_no_address_says_which_is_missing():
-    """A constructor that quietly connected to a default localhost would make
+    """A constructor that silently connected to a default localhost would make
     an empty result look like a measurement.
 
     Both remote adapters are checked. Testing one would leave the other free
@@ -238,7 +238,7 @@ class _FakeES:
 def test_the_matching_analyzer_is_actually_attached_to_the_fields():
     """An index created without its analyzer silently uses the default one.
 
-    That failure has no error and no empty result; it just quietly turns an
+    That failure has no error and no empty result; it just silently turns an
     A/B that claims to isolate BM25 scoring into one that also swapped the
     tokenizer. The mapping has to name the analyzer on the fields, not merely
     define it in settings.
@@ -255,7 +255,7 @@ def test_the_matching_analyzer_is_actually_attached_to_the_fields():
 def test_the_matching_analyzer_mirrors_this_repositorys_own_tokenizer():
     """The point of the 'matching' setting is that the ONLY difference from the
     in-memory leg is the scoring implementation. A different pattern or a
-    different stop list would quietly reintroduce the confound.
+    different stop list would silently reintroduce the confound.
 
     This test is not sufficient and says so. It passed for a full A/B run against an analyzer that
     tokenized "Checkout Service" as ["heckout", "ervice"], because an identical regex SOURCE is not
@@ -277,7 +277,7 @@ def test_the_pattern_tokenizer_is_case_insensitive():
 
     router/embeddings.py lowercases and then matches. Elasticsearch tokenizes
     and then lowercases. A lowercase-only character class therefore treats
-    every capital letter as a delimiter rather than folding it, and the two
+    every capital letter as a delimiter instead of folding it, and the two
     legs silently index different tokens while every offline assertion about
     the mapping still passes.
     """
@@ -397,3 +397,32 @@ def test_duckdb_only_loads_incident_rows():
     assert duck.load() == len(duck.rows())
     assert all(d.kind == "incident" for d in duck.rows())
     assert len(duck.rows()) < len(corpus.documents)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What is the meaning of incident severity",
+        "how many incidents did payments have in 2025",
+        "how many incidents did checkout and payments have in 2026",
+        "average time to resolve incidents in 2026Q3",
+        "what is the longest an incident took to resolve",
+        "count incidents per quarter",
+    ],
+)
+def test_duckdb_and_the_python_loop_read_a_query_the_same_way(query):
+    """Runs without duckdb installed. The adapter's SQL is plain enough for
+    the standard library's sqlite3, so it executes against a real table here
+    and its rows are compared with the Python loop's. A tell matched inside
+    another word ("meaning") or a year other than 2026 dropped from the scope
+    shows up as a different result."""
+    import sqlite3
+
+    from router.backends import RelationalBackend
+
+    corpus = build_corpus()
+    memory = RelationalBackend(corpus.documents).search(query)
+    duck = DuckDBBackend(corpus.documents, connection=sqlite3.connect(":memory:"))
+    duck.load()
+    got = duck.search(query)
+    assert [(h.doc_id, h.why) for h in got] == [(h.doc_id, h.why) for h in memory]

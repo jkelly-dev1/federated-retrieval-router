@@ -251,3 +251,44 @@ def test_the_dimension_is_wide_enough_to_avoid_manufactured_similarity(corpus):
         f"unrelated documents average {shipped:.4f} cosine, which puts a floor "
         f"under every retrieval score the vector leg produces"
     )
+
+
+def test_the_relational_scope_does_not_depend_on_the_hash_seed():
+    """Two services named in one query scope to the same one in every
+    process, the first in sorted order, as the DuckDB leg does; and a year
+    other than 2026 is a scope, not ignored."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    code = ("from router.backends import build_federation\n"
+            "from router.corpus import build_corpus\n"
+            "from router.models import Backend\n"
+            "leg = build_federation(build_corpus()).get(Backend.RELATIONAL)\n"
+            "print(leg.search('how many incidents did checkout and payments "
+            "have in 2026')[0].doc_id)\n"
+            "print(leg.search('how many incidents did payments have in 2025')"
+            "[0].doc_id)\n")
+    seen = set()
+    for seed in ("0", "1", "2", "3"):
+        env = dict(os.environ, PYTHONHASHSEED=seed, PYTHONPATH=str(root))
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=root,
+                             capture_output=True, text=True, check=True,
+                             timeout=120)
+        seen.add(out.stdout)
+    assert len(seen) == 1, seen
+    first, second = seen.pop().split()
+    assert first == "agg:count:checkout:2026"
+    assert second == "agg:count:payments:2025"
+
+
+def test_the_relational_tells_are_whole_words():
+    """"meaning" holds "mean" and "admin" holds "min"; neither is a tell, and
+    one parser serves both relational executors, so this is the only place a
+    substring match would show."""
+    from router.backends import parse_relational_query
+    scope = parse_relational_query("What is the meaning of incident severity", ["payments"])
+    assert not (scope.wants_mean or scope.wants_max or scope.wants_count), scope
+    scope = parse_relational_query("what is the mean resolution time", ["payments"])
+    assert scope.wants_mean, scope

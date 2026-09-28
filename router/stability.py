@@ -59,15 +59,24 @@ def _clip(text: str, width: int) -> str:
     return text if len(text) <= width else text[: width - 3] + "..."
 
 
+def _desc(text: str) -> tuple:
+    """A key that sorts `text` in DESCENDING order under max().
+
+    The trailing 1 outranks any negated character, so a prefix beats the
+    longer id it starts ("q-1" over "q-10"), as a lower id should.
+    """
+    return tuple(-ord(c) for c in text) + (1,)
+
+
 @dataclass(frozen=True)
 class Spread:
     """min / median / max of one metric across runs.
 
-    Deliberately not a mean and a standard deviation. Correctness over 19
-    queries is a step function with 20 possible values, and a standard
-    deviation over five draws of it invites exactly the inference this file
-    refuses to support. The min is the number that matters operationally: it is
-    the run a user would have gotten on their worst day.
+    Not a mean and a standard deviation. Correctness over 19 queries is a step
+    function with 20 possible values, and a standard deviation over five draws
+    of it invites exactly the inference this file refuses to support. The min
+    is the number that matters operationally: it is the run a user would have
+    gotten on their worst day.
     """
 
     values: tuple[float, ...]
@@ -199,11 +208,28 @@ class RouterStability:
 
     @property
     def worst_query(self) -> Optional[QueryStability]:
-        """The least stable query, or None if the router never varied."""
+        """The least stable query, or None if the router never varied.
+
+        Ties are common: two queries that each got two different backend sets
+        are equally unstable. The tie goes to the wider fan-out range, then to
+        the lower query id, so the column is the same in every process; it
+        names ONE of the tied queries, and `tied_worst` and the per-query
+        detail section list the rest.
+        """
         unstable = self.unstable
         if not unstable:
             return None
-        return max(unstable, key=lambda q: (q.distinct, q.fan_out_high))
+        return max(unstable, key=lambda q: (q.distinct, q.fan_out_high,
+                                            _desc(q.query_id)))
+
+    @property
+    def tied_worst(self) -> tuple:
+        """Every query exactly as unstable as `worst_query`, by distinct sets."""
+        worst = self.worst_query
+        if worst is None:
+            return ()
+        return tuple(sorted(q.query_id for q in self.unstable
+                            if q.distinct == worst.distinct))
 
     def traps_render(self) -> str:
         low, high = min(self.trap_correct), max(self.trap_correct)
@@ -310,7 +336,7 @@ class AxisComparison:
                     the word "indistinguishable" is honest.
       CLEAR         the challenger's worst run beats the baseline's best.
 
-    `ahead` / `level` / `behind` count runs rather than describing ranges, and
+    `ahead` / `level` / `behind` count runs instead of describing ranges, and
     they are only computed when the baseline never moved. Comparing run i of
     one router against run i of another means nothing unless one of them is a
     constant. `tally_valid` says which it was.
@@ -332,7 +358,7 @@ class AxisComparison:
 
         Deliberately range-based even when the tally is available: this is the
         survival condition the README's sentence asserts, and it must not
-        quietly become "ahead on average".
+        silently become "ahead on average".
         """
         if self.better_is_higher:
             return self.challenger.low > self.baseline.high
@@ -640,6 +666,12 @@ def render_per_query_table(stats: Sequence[RouterStability]) -> list[str]:
             + "  "
             + _clip(detail, WIDTH - 38)
         )
+        # The column names one query. When others are exactly as unstable,
+        # a second line names them, so the column does not read as a ranking.
+        others = [q for q in stat.tied_worst if q != worst.query_id]
+        if others:
+            lines.append(" " * 38 + _clip("tied with " + ", ".join(others),
+                                          WIDTH - 38))
     return lines
 
 

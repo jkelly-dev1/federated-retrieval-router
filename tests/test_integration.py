@@ -112,6 +112,8 @@ def test_duckdb_counts_what_the_python_loop_counts(duckdb_backend, corpus):
         "average time to resolve incidents in 2026Q3",
         "what is the longest an incident took to resolve",
         "count incidents per quarter",
+        "What is the meaning of incident severity",
+        "how many incidents did payments have in 2025",
     ],
 )
 def test_duckdb_and_the_python_loop_agree_on_every_aggregate_query(

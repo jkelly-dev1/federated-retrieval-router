@@ -17,7 +17,7 @@ most valuable ones here:
 
   The competence-gap check. On the offline embedder the fulltext leg beats the
   vector leg on genuine paraphrases. That is a known, documented limit of the
-  mock, and it is asserted rather than merely described, if it ever quietly
+  mock, and it is asserted rather than merely described, if it ever silently
   disappears, either the embedder changed or the queries stopped being
   paraphrases, and both are things a maintainer must be told about.
 
@@ -188,9 +188,11 @@ def run_checks() -> list[GateResult]:
     #    plateau the constant is supposed to sit above), and then the deepest
     #    plateau any query needs. Sweeping one query would not do: a query
     #    whose document both legs rank first shows recall at window 1, and
-    #    "DEFAULT_WINDOW >= 1" is true of every window anyone could set. On
-    #    this corpus q-multi-2 needs 20, which is DEFAULT_WINDOW exactly, so
-    #    the check is tight: drop the constant one step and it fails.
+    #    "DEFAULT_WINDOW >= 1" is true of every window anyone could set. The
+    #    sweep tries every window from 1 to 50 on 50-deep lists; on this
+    #    corpus q-multi-2 needs 12. The pipeline itself asks each leg for
+    #    DEFAULT_K results, so this measures the window for deeper fetches,
+    #    and the check's name says so.
     plateaus: dict[str, int] = {}
     for q in queries:
         if not q.relevant_docs:
@@ -206,10 +208,10 @@ def run_checks() -> list[GateResult]:
     deepest = plateaus.get(deepest_id, 0)
     # `deepest > 1` is the second direction. If every query plateaued at window
     # 1 the comparison below would be satisfied by any constant at all, and
-    # this check would have quietly stopped being able to fail again.
+    # this check would have silently stopped being able to fail again.
     results.append(
         GateResult(
-            "the fusion window is deep enough to fuse what the legs return",
+            "the fusion window covers the deepest 50-deep plateau",
             deepest > 1 and DEFAULT_WINDOW >= deepest,
             f"deepest plateau is window {deepest} ({deepest_id}) over "
             f"{len(plateaus)} queries, default is {DEFAULT_WINDOW}"

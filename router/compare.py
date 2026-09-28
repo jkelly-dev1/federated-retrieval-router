@@ -198,10 +198,10 @@ class StoreComparison:
     def artifact(self) -> int:
         """Net queries whose answer was an artifact of the implementation.
 
-        Signed on purpose. A real store that answers two more and two fewer
-        nets to zero and has changed the answer on four queries, which the
-        agreement column is there to expose. Reporting only this number is the
-        mistake the module docstring is about.
+        Signed. A real store that answers two more and two fewer nets to zero
+        and has changed the answer on four queries, which the agreement column
+        is there to expose. Reporting only this number is the mistake the
+        module docstring is about.
         """
         return len(self.gained) - len(self.lost)
 

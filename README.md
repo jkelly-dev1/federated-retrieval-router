@@ -18,8 +18,9 @@ The legs run sequentially by default and `federated_search` takes an
 `executor` if you want them concurrent. Sequential is the default because the
 four offline backends are pure Python in one process, so threading them would
 buy nothing a clock could see, and this repository reports no latency figures
-anywhere (design note 6). The executor pays off with the real store adapters,
-whose legs are network round trips.
+anywhere (design note 6). The executor may help with the real store adapters,
+where the pgvector and Elasticsearch legs are network round trips; that is not
+measured.
 
 The headline is not that federation wins. It is that how much it wins by is
 mostly an assumption about your traffic.
@@ -79,6 +80,10 @@ It beat the heuristic on cost every time. The spread between two frontier models
 is wider than the gap either one has with the hand-written baseline, so "an
 LLM router scores X" reports the model, not the architecture.
 
+The first-sample figures here come from a capture that is not in the
+repository: `audit/` is gitignored, and a later paid run writes its decisions
+to the same fixed path. The second sample's capture is in SAMPLE_RUN.md.
+
 What five runs buy that one cannot: routing stability. How many of the 19
 queries got the same set of backends in every run. An operational property
 almost nobody reports, because a router that answers a question two different
@@ -95,11 +100,15 @@ llm-anthropic                   17/19          19/19
 And what five runs do not buy, which the second sample is how I found out. After
 the first capture it was true, and tempting, to write that both models were
 least stable on `q-trap-3`; the config-key query the linked-entity guard exists
-for. Five more runs falsified it: `claude-opus-5` was stable on all 19, and
-`gpt-5.6-terra`'s flip moved to `q-multi-2`. Five runs are enough to show that
-a router is not deterministic. They are not enough to say which question it will
-be unreliable about. The claims that survived both samples are the ones about
-the router; the claim that died was the one about a specific query.
+for. Five more runs falsified half of it: `claude-opus-5` was stable on all 19.
+`gpt-5.6-terra` flipped on `q-trap-3` again, and also on `q-multi-2`, equally
+often. The paid capture's "least stable" column names only `q-multi-2`; a
+re-render of the same decisions adds a line naming `q-trap-3` as tied.
+
+Five runs are enough to show that a router is not deterministic. They are not
+enough to say which question every model will be unreliable about. The claims
+that survived both samples are the ones about the router; the claim that died
+was the one about both models sharing one query.
 
 What did reproduce about that trap is the reasoning. The guard exists because
 "which service owns gateway.envelope.strict" says "owns" and its subject is a
@@ -110,9 +119,9 @@ guard suppresses, stated more articulately than the guard states it, and wrong
 for the same reason.
 
 Reading the misroute counts together is the point. `gpt-5.6-terra` misroutes
-q-trap-1 in 5 of 5 runs and q-multi-2 in 1 of 5. A settled wrong opinion and an
-unreliable answer are different defects needing different fixes, and n=1 cannot
-tell them apart.
+q-trap-1 in 5 of 5 runs, q-trap-3 in 4 of 5 and q-multi-2 in 1 of 5. A settled
+wrong opinion and an unreliable answer are different defects needing different
+fixes, and n=1 cannot tell them apart.
 
 What n=5 does not buy: it detects instability, it does not rank two routers
 whose runs land on both sides of each other, and it does not identify which
@@ -135,7 +144,7 @@ variance, or the instrument is measuring its own noise.
 
 The same capture embeds the 85-document corpus twice, through two cold caches,
 because a capture that cannot say whether its own numbers reproduce is asserting
-reproducibility rather than measuring it:
+reproducibility instead of measuring it:
 
 ```
                               first sample  second sample
@@ -190,8 +199,9 @@ COMPETENCE VALIDATION (does the designated backend actually win, at k=3?)
 The offline embedder is a bag-of-tokens hash. On a paraphrase sharing even one
 rare term with its target (`dependency`, `backoff`, `twice`) BM25's idf carries
 more signal than the whole vector carries cosine, so the fulltext leg wins
-queries the vector leg is supposed to own. Measured jaccard overlap on those
-queries is 0.02 to 0.10, so they are genuine paraphrases and the win is real.
+queries the vector leg is supposed to own. Measured jaccard overlap across the
+vector-required queries is 0.02 to 0.10, so they are genuine paraphrases and
+the win is real.
 
 Scoring routing against measured winners would define the router's job as
 "predict what the mock does", and the project would score well by learning an
@@ -201,9 +211,9 @@ Closing this gap is exactly what a real embedding model is for, and it only
 half closes it. With `text-embedding-3-small` at 1536 dimensions the designed
 backend wins 9 of 11 rather than 7, and the count nobody retrieves falls from 2
 to 1. But `q-sem-2` still goes to fulltext with a real semantic model in place:
-a genuine paraphrase, overlap 0.02, and BM25's idf on one rare shared term
-still carries more signal than cosine. The convenient reading was that the mock
-was the whole problem. It was most of it.
+a genuine paraphrase, overlap 0.04 to 0.05, and BM25's idf on one rare shared
+term still carries more signal than cosine. The convenient reading was that the
+mock was the whole problem. It was most of it.
 
 ## Two guards, and why they are the engineering
 
@@ -224,7 +234,7 @@ list.
 
 Both hold across all five traps. `vector-only` gets 2 of 5.
 
-## Fusion, and the constant that decides it quietly
+## Fusion, and the constant that decides it silently
 
 Rank fusion, not score fusion: a BM25 score of 14.2 and a cosine of 0.83 are
 not on the same scale and BM25's range moves as the corpus grows. RRF throws
@@ -235,9 +245,14 @@ into each list as the window allows, so a document one leg ranks 12th cannot
 be fused at window 10 no matter how strongly another leg agrees, and the
 merged list looks perfectly reasonable while it happens. It is measured by
 `window_sweep` over every labeled query and asserted in
-`test_the_default_window_sits_above_the_corpus_plateau` rather than chosen: the
-deepest window any query needs is 20, which is the value, so the constant is
-pinned exactly rather than loosely bounded.
+`test_the_default_window_sits_above_the_corpus_plateau` rather than chosen:
+swept over every window from 1 to 50 on 50-deep lists, the deepest any query
+needs is 12, and the default of 20 sits above it. The shipped pipeline asks
+each leg for 5 results (`DEFAULT_K`), so there the window does not bind at
+all; it matters when a caller asks the legs for deeper lists. Fetching only 5
+per leg has a cost of its own: on `q-multi-2` a 50-deep fetch finds a relevant
+document the 5-deep fan-out misses, and the published figures are measured at
+5.
 
 ## Claims backed by tests
 
@@ -249,6 +264,7 @@ pinned exactly rather than loosely bounded.
 | Aggregate queries carry no relevant documents | `test_aggregate_queries_have_no_relevant_documents` |
 | Every backend is required by several queries | `test_every_backend_is_required_by_several_queries` |
 | The semantic queries are genuine paraphrases | `test_the_semantic_queries_are_genuine_paraphrases` |
+| The competence-gap figures above are the measured ones | `test_the_published_competence_figures_are_the_measured_ones` |
 | Every service and team has a graph node | `test_every_service_and_team_has_a_graph_node` |
 | Every incident is reachable from the graph | `test_every_incident_is_reachable_from_the_graph` |
 | The evaluation set is balanced and the mix is not | `test_the_evaluation_set_is_balanced_and_the_mix_is_not` |
@@ -313,6 +329,7 @@ pinned exactly rather than loosely bounded.
 | A leg with no document ground truth reports n/a, not zero | `test_a_leg_with_no_document_ground_truth_reports_n_a_not_zero` |
 | DuckDB counts what the Python loop counts | `test_duckdb_counts_what_the_python_loop_counts` |
 | DuckDB and the loop agree on every aggregate query | `test_duckdb_and_the_python_loop_agree_on_every_aggregate_query` |
+| ...and read a query the same way, with no DuckDB installed | `test_duckdb_and_the_python_loop_read_a_query_the_same_way` |
 | Cheaper without being more correct does not survive | `test_a_cheaper_router_that_is_not_more_correct_does_not_survive` |
 | A partial run is rejected rather than scored | `test_a_partial_run_is_rejected_rather_than_scored` |
 | Every rendered stability table fits the capture width | `test_every_rendered_table_fits_the_capture_width` |
@@ -338,7 +355,7 @@ pinned exactly rather than loosely bounded.
 
 ```
 pip install -r requirements.txt
-pytest -q                          # 163 passed, 16 skipped
+pytest -q                          # 178 passed, 18 skipped
 python -m router.gate              # the CI gate
 python scripts/run_demo.py         # the full demonstration
 ```
@@ -388,7 +405,7 @@ answer ...... one ranked list, every item carrying its provenance
 
 1. **The embedder is a hash model, not a semantic one.** Every vector number
    here is a floor, and the competence-validation section measures the shortfall
-   rather than hiding it. The direction matters: an instrument that understated
+   instead of hiding it. The direction matters: an instrument that understated
    the *graph* leg would flatter this project's thesis and should be treated as
    suspect. This one understates *vector*, which works against the thesis.
 
@@ -549,7 +566,7 @@ Apparatus and discipline around it:
 | `analyzer="matching"` vs `"english"` | swapping the store changes the scorer **and** the tokenizer at once; the mirrored analyzer reproduces this repo's own pattern and stop list so the two can be told apart |
 | pgvector runs an **exact scan** | no ANN index, so the first A/B isolates storage from approximation; recall loss from an index is a separate number and is named as not-measured |
 | same hash embedder on both sides | the delta is storage and ranking alone -- a real embedding model is what `scripts/real_run.py` measures, and mixing the two would make either number unattributable |
-| DuckDB keeps the existing phrase matching | the relational leg was never where the fudge was; moving the parser too would confound a store swap with a parser swap |
+| DuckDB keeps the in-memory leg's phrase matching | the relational leg was never where the fudge was; moving the parser too would confound a store swap with a parser swap |
 
 `scripts/compare_stores.py` refuses to print a table when no store is
 available, and when only some are up it names the ones it skipped in the output
@@ -568,6 +585,10 @@ an identifier, because the query is mangled the same way as the documents. The
 analyzer therefore sets `"flags": "CASE_INSENSITIVE"`, and the test that settles
 it runs real corpus text through the live `_analyze` endpoint and requires the
 token list to equal `content_tokens()` on all 189 strings.
+
+That test runs in a separate CI job with `continue-on-error: true`, and it
+skips when no Elasticsearch is listening, so it can fail or skip without
+turning the CI badge red.
 
 The headline cannot see it either. A run with the lowercase-only class reported
 the same net `+0`, the same `5 -> 5 /5` answers and the same recall

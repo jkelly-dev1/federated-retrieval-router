@@ -35,9 +35,9 @@ ROOT = Path(__file__).resolve().parent.parent
 def test_a_missing_sdk_is_a_sentence_not_a_traceback(monkeypatch):
     """A missing SDK gives a sentence naming the package, not a traceback.
 
-    `openai` is commented out of requirements.txt on purpose, so the offline
-    suite must behave identically whether or not it happens to be installed.
-    Hiding the import makes this test say the same thing on both machines.
+    `openai` is commented out of requirements.txt, so the offline suite must
+    behave identically whether or not it happens to be installed. Hiding the
+    import makes this test say the same thing on both machines.
     """
     real_import = builtins.__import__
 
@@ -253,7 +253,7 @@ def _router(body):
 def test_an_unparseable_reply_is_an_empty_choice_not_a_fan_out():
     """Marking your own homework, prevented.
 
-    A router that quietly falls back to every backend when its parser fails
+    A router that silently falls back to every backend when its parser fails
     would score its own failures as correct; fan-out cannot be wrong. The
     failure has to be visible in the numbers, so it chooses nothing and says
     so.
@@ -301,6 +301,19 @@ def test_a_partly_invented_reply_is_still_recorded_as_a_failure():
         "clean decision")
     assert "q1" in router.failures[0]
     assert "unparseable" in decision.rationale[0]
+    # And it is EMPTY, in either order: the real name parsed before the
+    # invented one must not survive into the decision.
+    assert decision.chosen == frozenset()
+    other = _router('{"backends": ["elasticsearch", "vector"], "why": "x"}')
+    assert other.route("q", "q1").chosen == frozenset()
+
+
+def test_a_reply_that_is_not_a_json_object_is_a_parse_failure():
+    """A JSON array has no .get, and must be recorded, not raised."""
+    router = _router('["vector"]')
+    decision = router.route("q", "q1")
+    assert decision.chosen == frozenset()
+    assert router.failures and "unparseable" in decision.rationale[0]
 
 
 def test_every_llm_decision_carries_a_rationale():
@@ -313,7 +326,7 @@ def test_the_prompt_does_not_hand_the_model_the_heuristic(monkeypatch):
     """The fairness invariant of the whole comparison.
 
     A model told "config keys look like a.b.c" or handed the corpus entity
-    names would be reciting the guard rather than being compared with it. The
+    names would be reciting the guard instead of being compared with it. The
     prompt describes the four backends by competence and nothing else.
     """
     from router.corpus import build_corpus

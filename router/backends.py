@@ -3,7 +3,7 @@
 They share an interface and nothing else. The point of the project is that
 their competences do not overlap as much as a single vector store makes it
 tempting to assume, so each one here is implemented well enough to be good at
-its own job and is deliberately NOT patched to be adequate at the others.
+its own job and is NOT patched to be adequate at the others.
 
 Why each one is written out rather than imported. BM25, cosine ranking, a graph
 traversal and a group-by are all short, and writing them out makes the
@@ -286,6 +286,52 @@ class GraphBackend:
 # -------------------------------------------------------------- relational
 
 
+@dataclass(frozen=True)
+class RelationalScope:
+    """What a query asks the relational leg for, read off its surface form.
+
+    Both relational executors, the Python loop below and the DuckDB adapter,
+    call `parse_relational_query` and nothing else to decide which rows are in
+    scope and which aggregates to compute. One parser means a store swap
+    cannot also be a parser swap.
+    """
+
+    service: Optional[str]
+    year: Optional[str]
+    quarters: tuple[str, ...]
+    wants_mean: bool
+    wants_max: bool
+    wants_per_quarter: bool
+    wants_count: bool
+
+    @property
+    def window(self) -> Optional[str]:
+        return self.quarters[0] if self.quarters else self.year
+
+
+def _said(lowered: str, *words: str) -> bool:
+    return any(re.search(r"\b" + re.escape(w) + r"\b", lowered) for w in words)
+
+
+def parse_relational_query(query: str, services: Iterable[str]) -> RelationalScope:
+    """Tells are whole words, a year is any 20xx, and when a query names two
+    services the first in sorted order wins, so the scope is the same in every
+    process whatever the hash seed."""
+    lowered = query.lower()
+    years = re.findall(r"\b(20\d\d)\b", lowered)
+    quarters = re.findall(r"20\d\d\s*q[1-4]", lowered.replace(" ", ""))
+    service = next((s for s in sorted(set(services)) if s in lowered), None)
+    return RelationalScope(
+        service=service,
+        year=years[0] if years else None,
+        quarters=tuple(quarters),
+        wants_mean=_said(lowered, "average", "mean", "avg"),
+        wants_max=_said(lowered, "longest", "max", "worst", "slowest"),
+        wants_per_quarter="per quarter" in lowered or "by quarter" in lowered,
+        wants_count=_said(lowered, "how many", "count", "number of", "total"),
+    )
+
+
 @dataclass
 class RelationalBackend:
     """Aggregates over incident rows. Answers are computed, never retrieved.
@@ -307,14 +353,9 @@ class RelationalBackend:
         return tuple(d for d in self.documents if d.kind == "incident")
 
     def search(self, query: str, k: int = DEFAULT_K) -> list[RankedHit]:
-        lowered = query.lower()
         rows = self.rows()
-        year = "2026" if "2026" in lowered else None
-        quarters = re.findall(r"20\d\d\s*q[1-4]", lowered.replace(" ", ""))
-        service = next(
-            (s for s in {d.service for d in rows if d.service} if s in lowered),
-            None,
-        )
+        scope = parse_relational_query(query, (d.service for d in rows if d.service))
+        service, year, quarters = scope.service, scope.year, scope.quarters
         scoped = [
             r for r in rows
             if (service is None or r.service == service)
@@ -323,32 +364,30 @@ class RelationalBackend:
         ]
         results: list[tuple[str, float, str]] = []
 
-        if any(w in lowered for w in ("average", "mean", "avg")):
+        if scope.wants_mean:
             if scoped:
                 mins = [r.minutes_to_resolve or 0 for r in scoped]
                 mean = sum(mins) / len(mins)
                 results.append((
-                    f"agg:mean_minutes:{service or 'all'}:{quarters[0] if quarters else year or 'all'}",
+                    f"agg:mean_minutes:{service or 'all'}:{scope.window or 'all'}",
                     1.0, f"mean minutes_to_resolve = {mean:.1f} over {len(scoped)} rows",
                 ))
-        if any(w in lowered for w in ("longest", "max", "worst", "slowest")):
+        if scope.wants_max:
             if scoped:
                 worst = max(scoped, key=lambda r: r.minutes_to_resolve or 0)
                 results.append((
                     f"agg:max_minutes:{worst.doc_id}", 1.0,
                     f"max minutes_to_resolve = {worst.minutes_to_resolve} ({worst.doc_id})",
                 ))
-        if "per quarter" in lowered or "by quarter" in lowered:
+        if scope.wants_per_quarter:
             counts: dict[str, int] = defaultdict(int)
             for r in scoped:
                 counts[r.quarter or "unknown"] += 1
             for q, n in sorted(counts.items()):
                 results.append((f"agg:count:{q}", 1.0, f"{q} = {n} incidents"))
-        if not results and any(
-            w in lowered for w in ("how many", "count", "number of", "total")
-        ):
+        if not results and scope.wants_count:
             results.append((
-                f"agg:count:{service or 'all'}:{quarters[0] if quarters else year or 'all'}",
+                f"agg:count:{service or 'all'}:{scope.window or 'all'}",
                 1.0, f"count = {len(scoped)} incidents",
             ))
         return _rank(results, self.backend, k)

@@ -310,7 +310,7 @@ def test_provenance_survives_fusion():
 
 
 def test_a_narrow_window_silently_discards_agreement():
-    """The constant that decides fusion and fails quietly.
+    """The constant that decides fusion and fails silently.
 
     A document one leg ranks deep cannot be fused no matter how strongly
     another leg agrees, and the merged list looks perfectly reasonable.
@@ -359,6 +359,9 @@ def test_the_default_window_sits_above_the_corpus_plateau(corpus, fed):
     assert deepest > 1, (
         "no labeled query needs a window deeper than 1, so nothing here "
         "measures DEFAULT_WINDOW")
+    # The README states the measured depth, so it is pinned here: a coarser
+    # sweep (the one that once put it at 20) moves this and fails.
+    assert (deepest_id, deepest) == ("q-multi-2", 12), (deepest_id, deepest)
     assert DEFAULT_WINDOW >= deepest, (
         f"{deepest_id} needs window {deepest} but DEFAULT_WINDOW is "
         f"{DEFAULT_WINDOW}; fusion is discarding agreement it was shown")
@@ -366,3 +369,26 @@ def test_the_default_window_sits_above_the_corpus_plateau(corpus, fed):
 
 def test_the_rank_constant_is_the_published_default():
     assert RANK_CONSTANT == 60
+
+
+def test_an_aggregate_tell_is_a_whole_word(heuristic):
+    """"sum" is not in "summarize", "mean" not in "meaning", "min" not in
+    "admin"."""
+    from router.models import Backend
+    for text in ("Summarize the incident on checkout",
+                 "What is the meaning of incident severity",
+                 "admin runbook for the incident"):
+        assert Backend.RELATIONAL not in heuristic.route(text, "q").chosen, text
+    assert Backend.RELATIONAL in heuristic.route(
+        "how many incidents did checkout have", "q").chosen
+
+
+def test_the_pipeline_fetches_default_k_from_each_leg():
+    """The published figures are measured at this depth, and the README's
+    note on the fusion window depends on it."""
+    import inspect
+    from router.backends import DEFAULT_K
+    from router.search import federated_search
+    assert DEFAULT_K == 5
+    assert inspect.signature(federated_search).parameters[
+        "per_leg_k"].default == DEFAULT_K

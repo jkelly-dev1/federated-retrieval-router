@@ -17,7 +17,7 @@ questions the deterministic stack structurally cannot:
   by selecting everything has not beaten anything.
 
 The house rule applies here too: a provider NAME without its matching KEY falls
-back to the offline component rather than raising. A missing key is a
+back to the offline component instead of raising. A missing key is a
 configuration state, not an error, and treating it as an error is how a suite
 ends up green only on the maintainer's machine.
 """
@@ -261,10 +261,16 @@ class LLMRouter:
             if text.startswith("```"):
                 text = text.split("```")[1].removeprefix("json").strip()
             parsed = json.loads(text)
+            if not isinstance(parsed, dict):
+                raise TypeError("the reply is not a JSON object")
             why = str(parsed.get("why", ""))[:80]
-            for name in parsed.get("backends", []):
-                chosen.add(Backend(str(name).strip().lower()))
-        except (ValueError, KeyError, TypeError) as exc:
+            # Built apart and kept only if EVERY name parses, so a reply that
+            # fails halfway is empty instead of carrying the names that
+            # happened to come first.
+            parsed_names = {Backend(str(name).strip().lower())
+                            for name in parsed.get("backends", [])}
+            chosen = parsed_names
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             self.failures.append(f"{query_id}: {type(exc).__name__}")
             why = f"unparseable reply ({type(exc).__name__})"
 

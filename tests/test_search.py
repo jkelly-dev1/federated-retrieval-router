@@ -208,6 +208,8 @@ def test_a_leg_that_raises_is_named_and_the_rest_still_fuse(fed):
     # It still counts as consulted: asking a store that failed cost what
     # asking it cost.
     assert Backend.FULLTEXT in result.consulted
+    assert result.backends_consulted == len(result.per_backend) + len(
+        result.failures)
 
 
 def test_a_complete_run_reports_complete_and_has_no_failures(fed):

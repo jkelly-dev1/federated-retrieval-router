@@ -13,7 +13,7 @@ not come back.
 
 The cost number is a measurement. `backends_consulted` counts legs this run
 actually searched. It is derived by executing the plan, not by summing it, so
-an edit that quietly widens a router's choice shows up here as more work done
+an edit that silently widens a router's choice shows up here as more work done
 as well as a different set on paper.
 
 Partial failure is named, never fused away. `reciprocal_rank_fusion` takes a
@@ -33,9 +33,9 @@ chosen legs run together. It defaults to None because the four offline
 backends in backends.py are pure-Python and GIL-bound, so threads would buy
 nothing a clock could see, and design note 6 of the README says this
 repository reports no latency or cost figures; a speedup claim that was never
-measured has no place here. The executor is worth using with the adapters in
-adapters.py, whose legs are network round trips to pgvector, Elasticsearch and
-DuckDB. The seam is exposed and the choice is left to the caller, as `weights`
+measured has no place here. The executor may help with the adapters in
+adapters.py, where the pgvector and Elasticsearch legs are network round trips
+(the DuckDB leg runs in-process); that is not measured. The seam is exposed and the choice is left to the caller, as `weights`
 is in fusion.py for the same reason.
 """
 from __future__ import annotations

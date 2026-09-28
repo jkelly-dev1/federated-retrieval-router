@@ -13,7 +13,7 @@ stores, pgvector, Elasticsearch, DuckDB, and reports the difference.
 It costs nothing and calls no vendor. Unlike scripts/real_run.py there is no
 key, no API and no bill: the stores are local containers or an in-process
 engine. What it needs is infrastructure, and it says exactly which piece is
-missing rather than quietly comparing fewer legs than it claims.
+missing rather than silently comparing fewer legs than it claims.
 
 What it refuses to do. With nothing available it exits 2 instead of printing an
 empty table that reads like a finding. With SOME stores available it compares

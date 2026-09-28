@@ -7,7 +7,7 @@ other when they MEAN the same thing, and that difference is the entire
 competence the vector leg is supposed to have.
 
 So the mock understates the vector leg, and the project says so rather than
-quietly benefiting. A paraphrase query that shares no vocabulary with its
+silently benefiting. A paraphrase query that shares no vocabulary with its
 target document is exactly what a semantic model finds and this one cannot.
 Every offline number about semantic retrieval is therefore a FLOOR, not an
 estimate, and the real-model capture exists to measure the gap.
@@ -29,7 +29,7 @@ from typing import Iterable, Protocol, Sequence
 # corpus drops below 0.08; narrower widths manufacture similarity through hash
 # collisions.
 # tests/test_backends.py::test_the_dimension_is_wide_enough_to_avoid
-# _manufactured_similarity re-derives it rather than trusting it.
+# _manufactured_similarity re-derives it instead of trusting it.
 DIMENSIONS = 256
 
 # Dots are allowed INSIDE an identifier and never at the end. The obvious
@@ -39,12 +39,12 @@ DIMENSIONS = 256
 # fulltext leg simply returns nothing on precisely the identifier lookups it is
 # supposed to be best at, and it is why tests/test_backends.py::test_an
 # _identifier_does_not_absorb_trailing_punctuation pins punctuation handling
-# rather than assuming it.
+# instead of assuming it.
 _TOKEN = re.compile(r"[a-z0-9_]+(?:\.[a-z0-9_]+)*")
 
-# Words that carry no retrieval signal. Kept SHORT on purpose: an aggressive
-# stop list is a silent tuning knob, and half the point of the trap queries is
-# that words like "how many" and "owns" are signal rather than noise.
+# Words that carry no retrieval signal. Kept SHORT: an aggressive stop list is
+# a silent tuning knob, and half the point of the trap queries is that words
+# like "how many" and "owns" are signal rather than noise.
 STOPWORDS = frozenset(
     {"the", "a", "an", "is", "are", "was", "were", "do", "does", "did",
      "of", "to", "in", "on", "for", "and", "or", "that", "this", "it",
@@ -107,7 +107,7 @@ class HashingEmbedder:
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """Cosine similarity. Returns 0.0 for a zero vector rather than raising.
+    """Cosine similarity. Returns 0.0 for a zero vector instead of raising.
 
     An all-stopword query is a real thing a user types, and it should retrieve
     nothing rather than crash a sweep.
